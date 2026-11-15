@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Plus,
   Maximize2,
@@ -19,57 +19,101 @@ import {
   MessageSquare,
   Grid,
   HelpCircle,
+  Eye,
+  EyeOff,
+  Lock,
+  Unlock,
+  RefreshCw,
+  Download,
+  Activity,
 } from 'lucide-react';
 import {
   SymbolInfo,
-  NewsItem,
   PriceAlert,
   TradePosition,
   formatPrice,
-  getForwardCurve,
   calculatePositionPnL,
 } from '../utils/marketEngine';
-import { RightRailTab, ChartDrawing, IndicatorConfig } from '../types/trading';
+import {
+  RightRailTab,
+  ChartDrawing,
+  IndicatorConfig,
+  EconomicEventItem,
+  BondYieldItem,
+  TickTapeEntry,
+  LseSymbolDetails,
+  OptionChainContract,
+  OptionFlowPrint,
+} from '../types/trading';
 
 interface RightSidebarProps {
   symbols: SymbolInfo[];
   watchlistSymbols: string[];
   activeSymbol: string;
+  activeTimeframe: string;
   onSelectSymbol: (symbol: string) => void;
   onRemoveFromWatchlist: (symbol: string) => void;
   onToggleSymbolFlag: (symbol: string) => void;
   onOpenAddSymbol: () => void;
-  news: NewsItem[];
+  onRefreshQuotes: () => void;
+  economicEvents: EconomicEventItem[];
+  bondYields: BondYieldItem[];
+  symbolDetails: LseSymbolDetails | null;
+  loadingDetails: boolean;
+  tickTape: TickTapeEntry[];
   activeTab: RightRailTab;
+  panelOpen?: boolean;
   onSelectTab: (tab: RightRailTab) => void;
   alerts: PriceAlert[];
   onOpenCreateAlert: () => void;
   onRemoveAlert: (id: string) => void;
   drawings: ChartDrawing[];
+  selectedDrawingId: string | null;
+  onSelectDrawing: (id: string | null) => void;
+  onUpdateDrawing: (drawing: ChartDrawing) => void;
   onRemoveDrawing: (id: string) => void;
   indicators: IndicatorConfig[];
   onToggleIndicator: (id: string) => void;
   positions: TradePosition[];
-  onQuickOrder: (side: 'BUY' | 'SELL') => void;
+  onQuickOrder: (side: 'BUY' | 'SELL', qty?: number, stopLoss?: number, takeProfit?: number) => void;
   onClosePosition: (id: string) => void;
   lastTickSymbol: string | null;
+  onOpenUsageModal: () => void;
+  onSelectOptionContract?: (contract: {
+    occSymbol: string;
+    underlying: string;
+    strike: number;
+    expiry: string;
+    contract_type: 'call' | 'put';
+  }) => void;
+  onOpenGexDashboard?: (underlying: string) => void;
 }
 
 export const RightSidebar: React.FC<RightSidebarProps> = ({
   symbols,
   watchlistSymbols,
   activeSymbol,
+  activeTimeframe,
   onSelectSymbol,
   onRemoveFromWatchlist,
   onToggleSymbolFlag,
   onOpenAddSymbol,
-  news,
+  onRefreshQuotes,
+  economicEvents,
+  bondYields,
+  symbolDetails,
+  loadingDetails,
+  tickTape,
   activeTab,
+  panelOpen = true,
   onSelectTab,
   alerts,
   onOpenCreateAlert,
   onRemoveAlert,
   drawings,
+  selectedDrawingId,
+  onSelectDrawing,
+  onUpdateDrawing,
   onRemoveDrawing,
   indicators,
   onToggleIndicator,
@@ -77,85 +121,301 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   onQuickOrder,
   onClosePosition,
   lastTickSymbol,
+  onOpenUsageModal,
+  onSelectOptionContract,
+  onOpenGexDashboard,
 }) => {
   const [watchlistFilter, setWatchlistFilter] = useState<'all' | 'flagged'>('all');
   const [detailsExpanded, setDetailsExpanded] = useState(true);
+  const [watchlistMenuOpen, setWatchlistMenuOpen] = useState(false);
+  const watchlistMenuRef = useRef<HTMLDivElement>(null);
+
+  // DOM Order Ticket inputs
+  const [orderQty, setOrderQty] = useState<number>(1);
+  const [orderSl, setOrderSl] = useState<string>('');
+  const [orderTp, setOrderTp] = useState<string>('');
+
+  // US Options Chain & Flow state
+  const [optSubTab, setOptSubTab] = useState<'chain' | 'flow'>('chain');
+  const [optUnderlying, setOptUnderlying] = useState<string>('AAPL');
+  const [optDraftTicker, setOptDraftTicker] = useState<string>('AAPL');
+  const [optContractType, setOptContractType] = useState<'all' | 'call' | 'put'>('all');
+  const [optSelectedExpiry, setOptSelectedExpiry] = useState<string>('');
+  const [optFlowAllMarket, setOptFlowAllMarket] = useState<boolean>(false);
+  const [optMinPremium, setOptMinPremium] = useState<number>(25000);
+  const [optChainData, setOptChainData] = useState<{
+    underlyingPrice: number | null;
+    expiries: string[];
+    contracts: OptionChainContract[];
+  } | null>(null);
+  const [optFlowPrints, setOptFlowPrints] = useState<OptionFlowPrint[]>([]);
+  const [loadingOptions, setLoadingOptions] = useState<boolean>(false);
+  const [optionsError, setOptionsError] = useState<string | null>(null);
+
+  // LSE CSV Estimator & Export form state
+  const [expFrom, setExpFrom] = useState<string>(() =>
+    new Date(Date.now() - 3 * 86400 * 1000).toISOString().slice(0, 10)
+  );
+  const [expTo, setExpTo] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [expTf, setExpTf] = useState<string>('1m');
+  const [estimateResult, setEstimateResult] = useState<{
+    rows?: number;
+    bytes?: number;
+    error?: string;
+  } | null>(null);
+  const [estimating, setEstimating] = useState(false);
+
+  useEffect(() => {
+    const handleOutside = (e: MouseEvent) => {
+      if (watchlistMenuRef.current && !watchlistMenuRef.current.contains(e.target as Node)) {
+        setWatchlistMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
 
   const selectedSymbolObj = symbols.find((s) => s.symbol === activeSymbol) || symbols[0];
-  const activeNews = news.find((n) => n.symbol === activeSymbol) || news[0];
-  const forwardCurve = getForwardCurve(selectedSymbolObj);
+
+  // Auto-follow active US stock symbol in Options panel when user switches chart to a stock
+  useEffect(() => {
+    if (selectedSymbolObj?.lseMarket === 'us_stocks') {
+      const sym = selectedSymbolObj.symbol.toUpperCase();
+      setOptUnderlying(sym);
+      setOptDraftTicker(sym);
+      setOptSelectedExpiry('');
+    }
+  }, [selectedSymbolObj?.lseMarket, selectedSymbolObj?.symbol]);
+
+  // Fetch LSE US Options Chain & Flow lazily when Options panel is active
+  useEffect(() => {
+    if (!panelOpen || activeTab !== 'options') return;
+    let cancelled = false;
+    setLoadingOptions(true);
+    setOptionsError(null);
+
+    const run = async () => {
+      try {
+        if (optSubTab === 'chain') {
+          const qs = new URLSearchParams({
+            underlying: optUnderlying,
+            limit: '150',
+          });
+          if (optContractType !== 'all') qs.set('contract_type', optContractType);
+          if (optSelectedExpiry) qs.set('expiry', optSelectedExpiry);
+          const res = await fetch(`/api/lse/options/chain?${qs.toString()}`);
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || 'Failed to load LSE options chain');
+          if (!cancelled) {
+            const expiries = Array.isArray(data.expiries) ? data.expiries : [];
+            setOptChainData({
+              underlyingPrice: data.underlyingPrice ?? null,
+              expiries,
+              contracts: Array.isArray(data.contracts) ? data.contracts : [],
+            });
+          }
+        } else {
+          const qs = new URLSearchParams({ limit: '60' });
+          if (!optFlowAllMarket && optUnderlying) qs.set('underlying', optUnderlying);
+          if (optMinPremium > 0) qs.set('min_premium', String(optMinPremium));
+          const res = await fetch(`/api/lse/options/flow?${qs.toString()}`);
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || 'Failed to load LSE options flow');
+          if (!cancelled) {
+            setOptFlowPrints(Array.isArray(data.prints) ? data.prints : []);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) setOptionsError((err as Error).message || 'Options request failed');
+      } finally {
+        if (!cancelled) setLoadingOptions(false);
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    panelOpen,
+    activeTab,
+    optSubTab,
+    optUnderlying,
+    optContractType,
+    optSelectedExpiry,
+    optFlowAllMarket,
+    optMinPremium,
+  ]);
+  const topEconomicEvent = economicEvents[0] || null;
 
   const displayedWatchlist = watchlistSymbols
     .map((symKey) => symbols.find((s) => s.symbol === symKey))
     .filter((s): s is SymbolInfo => Boolean(s))
     .filter((s) => (watchlistFilter === 'flagged' ? Boolean(s.flagColor) : true));
 
+  const activeAlertsCount = alerts.filter((a) => a.active).length;
+
+  const handleDownloadWatchlistCsv = () => {
+    const header = 'Symbol,Name,Exchange,Market,Last,Change,ChangePct,Volume\n';
+    const rows = displayedWatchlist
+      .map(
+        (s) =>
+          `${s.symbol},"${s.name}",${s.exchange},${s.lseMarket},${s.price},${s.change},${s.changePercent}%,${s.volume24h}`
+      )
+      .join('\n');
+    const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `watchlist_lse_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setWatchlistMenuOpen(false);
+  };
+
+  const handleEstimateExport = async () => {
+    setEstimating(true);
+    setEstimateResult(null);
+    try {
+      const qs = new URLSearchParams({
+        market: selectedSymbolObj.lseMarket,
+        symbol: selectedSymbolObj.lseHttpSymbol,
+        timeframe: expTf,
+        from: expFrom,
+        to: expTo,
+      });
+      const res = await fetch(`/api/lse/estimate?${qs.toString()}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Estimate failed');
+      setEstimateResult({
+        rows: data.estimated_rows ?? data.rows ?? 0,
+        bytes: data.estimated_bytes ?? data.bytes ?? 0,
+      });
+    } catch (err) {
+      setEstimateResult({ error: (err as Error).message });
+    } finally {
+      setEstimating(false);
+    }
+  };
+
+  const handleDownloadLseCsv = () => {
+    const qs = new URLSearchParams({
+      market: selectedSymbolObj.lseMarket,
+      symbol: selectedSymbolObj.lseHttpSymbol,
+      timeframe: expTf,
+      from: expFrom,
+      to: expTo,
+      adjusted: '1',
+    });
+    const a = document.createElement('a');
+    a.href = `/api/lse/export?${qs.toString()}`;
+    a.download = `${selectedSymbolObj.lseHttpSymbol}_${expTf}.csv`;
+    a.click();
+  };
+
   return (
     <div className="flex h-full shrink-0 select-none z-30">
-      {/* Main Right Sidebar Content Area (276px wide matching Screenshot 1) */}
+      {/* Main Right Sidebar Content Area (244px slim layout, collapsible via rail toggle) */}
+      {panelOpen && (
       <aside
         aria-label="Watchlist and Symbol Details"
-        className="w-[278px] bg-[#0a0a0d] border-l border-[#222631] flex flex-col h-full overflow-hidden"
+        className="w-[268px] bg-[#0a0a0d] border-l border-[#222631] flex flex-col h-full overflow-hidden"
       >
         {activeTab === 'watchlist' && (
           <>
             {/* Top Half: Watchlist */}
             <div
               className={`flex flex-col ${
-                detailsExpanded ? 'h-[236px]' : 'flex-1'
+                detailsExpanded ? 'h-[204px]' : 'flex-1'
               } border-b border-[#222631] shrink-0`}
             >
               {/* Watchlist Header Bar */}
-              <div className="h-[38px] px-3 flex items-center justify-between border-b border-[#181b24] shrink-0">
+              <div className="h-[32px] px-2.5 flex items-center justify-between border-b border-[#181b24] shrink-0 relative">
                 <button
                   type="button"
                   onClick={() => setWatchlistFilter((f) => (f === 'all' ? 'flagged' : 'all'))}
                   aria-label="Filter Watchlist"
-                  className="flex items-center gap-1 text-[13px] font-semibold text-[#e0e3eb] hover:text-white cursor-pointer"
+                  className="flex items-center gap-1 text-[12px] font-semibold text-[#e0e3eb] hover:text-white cursor-pointer"
                 >
-                  <span>{watchlistFilter === 'all' ? 'Watchlist' : 'Red & Orange List'}</span>
-                  <span className="text-[10px] text-[#787b86]">▼</span>
+                  <span>{watchlistFilter === 'all' ? 'Watchlist' : 'Flagged List'}</span>
+                  <span className="text-[9px] text-[#787b86]">▼</span>
                 </button>
 
-                <div className="flex items-center gap-1 text-[#b2b5be]">
+                <div className="flex items-center gap-0.5 text-[#b2b5be]" ref={watchlistMenuRef}>
                   <button
                     type="button"
                     onClick={onOpenAddSymbol}
                     aria-label="Add Symbol to Watchlist"
-                    title="Add Symbol to Watchlist"
-                    className="w-6 h-6 rounded hover:bg-[#1e222d] flex items-center justify-center hover:text-white transition-colors"
+                    title="Add LSE Symbol to Watchlist"
+                    className="w-5 h-5 rounded hover:bg-[#1e222d] flex items-center justify-center hover:text-white transition-colors"
                   >
-                    <Plus className="w-4 h-4" />
+                    <Plus className="w-3.5 h-3.5" />
                   </button>
                   <button
                     type="button"
                     onClick={() => setDetailsExpanded((v) => !v)}
                     aria-label="Toggle Symbol Details Pane"
                     title="Expand / Collapse Watchlist"
-                    className="w-6 h-6 rounded hover:bg-[#1e222d] flex items-center justify-center hover:text-white transition-colors"
+                    className="w-5 h-5 rounded hover:bg-[#1e222d] flex items-center justify-center hover:text-white transition-colors"
                   >
-                    <Maximize2 className="w-3.5 h-3.5" />
+                    <Maximize2 className="w-3 h-3" />
                   </button>
                   <button
                     type="button"
-                    onClick={() => setWatchlistFilter('all')}
+                    onClick={() => setWatchlistMenuOpen((v) => !v)}
                     aria-label="Watchlist Options"
-                    className="w-6 h-6 rounded hover:bg-[#1e222d] flex items-center justify-center hover:text-white transition-colors"
+                    title="Watchlist Options"
+                    className="w-5 h-5 rounded hover:bg-[#1e222d] flex items-center justify-center hover:text-white transition-colors"
                   >
-                    <MoreHorizontal className="w-4 h-4" />
+                    <MoreHorizontal className="w-3.5 h-3.5" />
                   </button>
+
+                  {watchlistMenuOpen && (
+                    <div className="absolute right-2 top-[30px] w-44 bg-[#181b24] border border-[#2a2e39] rounded shadow-2xl py-1 z-50 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onRefreshQuotes();
+                          setWatchlistMenuOpen(false);
+                        }}
+                        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[#d1d4dc] hover:bg-[#222631] hover:text-white"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span>Refresh LSE Quotes</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setWatchlistFilter((f) => (f === 'all' ? 'flagged' : 'all'));
+                          setWatchlistMenuOpen(false);
+                        }}
+                        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[#d1d4dc] hover:bg-[#222631] hover:text-white"
+                      >
+                        <Bookmark className="w-3 h-3" />
+                        <span>{watchlistFilter === 'all' ? 'Show Flagged Only' : 'Show All Symbols'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDownloadWatchlistCsv}
+                        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[#d1d4dc] hover:bg-[#222631] hover:text-white"
+                      >
+                        <Download className="w-3 h-3" />
+                        <span>Export Watchlist CSV</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Watchlist Column Headers: [Flag] Symb | Last | Chg | Chg% */}
-              <div className="h-[26px] px-2 flex items-center text-[11px] text-[#787b86] border-b border-[#181b24] shrink-0">
-                <div className="w-3.5 flex items-center justify-center mr-1">
-                  <span className="w-2.5 h-2 bg-[#434651] inline-block rounded-xs" />
+              {/* Watchlist Column Headers */}
+              <div className="h-[22px] px-1.5 flex items-center text-[10.5px] text-[#787b86] border-b border-[#181b24] shrink-0">
+                <div className="w-3 flex items-center justify-center mr-1 shrink-0">
+                  <span className="w-2 h-1.5 bg-[#434651] inline-block rounded-xs" />
                 </div>
-                <div className="w-[74px] text-left">Symb</div>
-                <div className="flex-1 text-right pr-1">Last</div>
-                <div className="w-[52px] text-right">Chg</div>
-                <div className="w-[52px] text-right pr-1">Chg%</div>
+                <div className="w-[88px] text-left shrink-0">Symb</div>
+                <div className="flex-1 text-right pr-1.5">Last</div>
+                <div className="w-[46px] text-right pr-1">Chg</div>
+                <div className="w-[44px] text-right pr-0.5">Chg%</div>
               </div>
 
               {/* Watchlist Rows */}
@@ -178,13 +438,13 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                           onSelectSymbol(item.symbol);
                         }
                       }}
-                      className={`group relative h-[36px] px-1.5 flex items-center text-[12px] cursor-pointer transition-colors ${
+                      className={`group relative h-[28px] px-1.5 flex items-center text-[10.5px] cursor-pointer transition-colors ${
                         isSelected
                           ? 'bg-[#1c202b] border-y border-[#363a45]'
                           : 'hover:bg-[#141720]'
                       }`}
                     >
-                      {/* Left Ribbon Flag matching Screenshot 1 */}
+                      {/* Left Ribbon Flag */}
                       <button
                         type="button"
                         onClick={(ev) => {
@@ -192,11 +452,11 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                           onToggleSymbolFlag(item.symbol);
                         }}
                         aria-label={`Flag ${item.symbol}`}
-                        className="w-3.5 h-4 flex items-center justify-center mr-1 shrink-0"
+                        className="w-3 h-3.5 flex items-center justify-center mr-1 shrink-0"
                       >
                         <svg
                           viewBox="0 0 12 10"
-                          className={`w-2.5 h-2.5 ${
+                          className={`w-2 h-2 ${
                             item.flagColor === 'red'
                               ? 'text-[#f23645] fill-current'
                               : item.flagColor === 'orange'
@@ -210,68 +470,80 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                         </svg>
                       </button>
 
-                      {/* Circular Instrument Badge ("100", "30", "500", Gold icon) + Symbol Code */}
-                      <div className="w-[74px] flex items-center gap-1.5 min-w-0 shrink-0">
+                      {/* Circular Instrument Badge + Symbol Code */}
+                      <div className="w-[88px] flex items-center gap-1 min-w-0 shrink-0 pr-1">
                         <span
                           style={{
                             backgroundColor: item.badgeBg,
                             color: item.badgeColor || '#ffffff',
                           }}
-                          className="w-4 h-4 rounded-full flex items-center justify-center text-[8.5px] font-extrabold leading-none shrink-0"
+                          className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7.5px] font-extrabold leading-none shrink-0"
                         >
                           {item.badgeText}
                         </span>
-                        <span className="font-semibold text-[#e0e3eb] truncate flex items-center gap-0.5">
+                        <span className="font-semibold text-[10.5px] text-[#e0e3eb] truncate flex items-center gap-0.5">
                           {item.symbol}
-                          <span className="text-[7px] text-[#ff9800] align-top">●</span>
+                          <span
+                            className={`text-[6px] align-top ${
+                              item.dataSource === 'lse-live' ? 'text-[#089981]' : 'text-[#ff9800]'
+                            }`}
+                          >
+                            ●
+                          </span>
                         </span>
                       </div>
 
                       {/* Last Price */}
                       <div
-                        className={`flex-1 text-right font-mono tabular-nums pr-1 ${
-                          justTicked
+                        className={`flex-1 text-right font-mono tabular-nums pr-1.5 ${
+                          item.price <= 0
+                            ? 'text-[#787b86]'
+                            : justTicked
                             ? isNegative
                               ? 'text-[#ff5252] font-semibold'
                               : 'text-[#00e676] font-semibold'
-                            : item.symbol === 'YM1!'
-                            ? 'text-[#d1d4dc]'
                             : isNegative
                             ? 'text-[#f23645]'
                             : 'text-[#089981]'
                         }`}
                       >
-                        {item.symbol === 'YM1!' ? (
-                          <span>
-                            52,34<span className="text-[#089981]">{Math.abs(item.price) % 10}</span>
-                          </span>
-                        ) : (
-                          formatPrice(
-                            item.price,
-                            item.symbol === 'NQ1!' || item.symbol === 'BTCUSD' ? 1 : item.decimals
-                          )
-                        )}
+                        {item.price > 0
+                          ? formatPrice(item.price, item.decimals >= 4 ? 4 : item.decimals)
+                          : '—'}
                       </div>
 
                       {/* Change */}
                       <div
-                        className={`w-[52px] text-right font-mono tabular-nums ${
-                          isNegative ? 'text-[#f23645]' : 'text-[#089981]'
+                        className={`w-[46px] text-right font-mono tabular-nums pr-1 truncate ${
+                          item.price <= 0
+                            ? 'text-[#787b86]'
+                            : isNegative
+                            ? 'text-[#f23645]'
+                            : 'text-[#089981]'
                         }`}
                       >
-                        {formatPrice(item.change, item.symbol === 'BTCUSD' ? 0 : item.decimals)}
+                        {item.price > 0
+                          ? formatPrice(
+                              item.change,
+                              item.decimals >= 4 ? 4 : item.symbol === 'BTCUSDT' ? 0 : item.decimals
+                            )
+                          : '—'}
                       </div>
 
                       {/* Change % */}
                       <div
-                        className={`w-[52px] text-right font-mono tabular-nums pr-1 ${
-                          isNegative ? 'text-[#f23645]' : 'text-[#089981]'
+                        className={`w-[44px] text-right font-mono tabular-nums pr-0.5 ${
+                          item.price <= 0
+                            ? 'text-[#787b86]'
+                            : isNegative
+                            ? 'text-[#f23645]'
+                            : 'text-[#089981]'
                         }`}
                       >
-                        {item.changePercent.toFixed(2)}%
+                        {item.price > 0 ? `${item.changePercent.toFixed(2)}%` : '—'}
                       </div>
 
-                      {/* Hover Delete Trash Button matching Screenshot 1 on NQ1! row */}
+                      {/* Hover Delete Trash Button */}
                       <button
                         type="button"
                         onClick={(ev) => {
@@ -279,9 +551,9 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                           onRemoveFromWatchlist(item.symbol);
                         }}
                         aria-label={`Remove ${item.symbol} from watchlist`}
-                        className="hidden group-hover:flex absolute right-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded bg-[#2a2e39] hover:bg-[#363a45] text-[#d1d4dc] hover:text-white items-center justify-center shadow"
+                        className="hidden group-hover:flex absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 rounded bg-[#2a2e39] hover:bg-[#363a45] text-[#d1d4dc] hover:text-white items-center justify-center shadow"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-3 h-3" />
                       </button>
                     </div>
                   );
@@ -289,102 +561,139 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
               </div>
             </div>
 
-            {/* Bottom Half: Selected Symbol Details + News Card + Forward Curve */}
+            {/* Bottom Half: Selected Symbol Details + Economic Calendar Card + Forward Curve */}
             {detailsExpanded && (
-              <div className="flex-1 overflow-y-auto px-3 py-2.5 flex flex-col gap-3">
+              <div className="flex-1 overflow-y-auto px-2.5 py-2 flex flex-col gap-2">
                 {/* Symbol Header Row */}
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     <span
                       style={{
                         backgroundColor: selectedSymbolObj.badgeBg,
                         color: selectedSymbolObj.badgeColor || '#ffffff',
                       }}
-                      className="w-5 h-5 rounded-full flex items-center justify-center text-[9.5px] font-extrabold"
+                      className="w-4 h-4 rounded-full flex items-center justify-center text-[8.5px] font-extrabold"
                     >
                       {selectedSymbolObj.badgeText}
                     </span>
-                    <span className="text-[14px] font-bold text-white">
+                    <span className="text-[13px] font-bold text-white">
                       {selectedSymbolObj.symbol}
                     </span>
-                    <span className="text-[8px] text-[#ff9800]">●</span>
+                    <span
+                      className={`text-[7px] ${
+                        selectedSymbolObj.dataSource === 'lse-live'
+                          ? 'text-[#089981]'
+                          : 'text-[#ff9800]'
+                      }`}
+                    >
+                      ●
+                    </span>
                   </div>
-                  <div className="flex items-center gap-1.5 text-[#9598a1]">
+                  <div className="flex items-center gap-0.5 text-[#9598a1]">
                     <button
                       type="button"
                       onClick={() => onSelectTab('object_tree')}
                       aria-label="View Data Window"
-                      className="p-1 hover:text-white rounded hover:bg-[#1e222d]"
+                      title="Object Tree & Indicators"
+                      className="p-0.5 hover:text-white rounded hover:bg-[#1e222d]"
                     >
-                      <LayoutGrid className="w-3.5 h-3.5" />
+                      <LayoutGrid className="w-3 h-3" />
                     </button>
                     <button
                       type="button"
                       onClick={onOpenCreateAlert}
                       aria-label="Add Symbol Note or Alert"
-                      className="p-1 hover:text-white rounded hover:bg-[#1e222d]"
+                      title="Create Price Alert"
+                      className="p-0.5 hover:text-white rounded hover:bg-[#1e222d]"
                     >
-                      <Edit className="w-3.5 h-3.5" />
+                      <Edit className="w-3 h-3" />
                     </button>
                     <button
                       type="button"
-                      onClick={() => onSelectTab('dom_trade')}
-                      aria-label="More Symbol Actions"
-                      className="p-1 hover:text-white rounded hover:bg-[#1e222d]"
+                      onClick={() => onSelectTab('screener_factors')}
+                      aria-label="Symbol Fundamentals and Details"
+                      title="View LSE Fundamentals & History"
+                      className="p-0.5 hover:text-white rounded hover:bg-[#1e222d]"
                     >
-                      <MoreHorizontal className="w-3.5 h-3.5" />
+                      <MoreHorizontal className="w-3 h-3" />
                     </button>
                   </div>
                 </div>
 
                 {/* Full Instrument Name & Exchange Subtitle */}
-                <div className="text-[11.5px] text-[#9598a1] leading-snug -mt-1">
-                  <div className="flex items-center gap-1 text-[#b2b5be]">
-                    <span>{selectedSymbolObj.name}</span>
-                    <ExternalLink className="w-3 h-3 inline text-[#787b86]" />
-                    <span>· {selectedSymbolObj.exchange}</span>
+                <div className="text-[11px] text-[#9598a1] leading-snug -mt-0.5">
+                  <div className="flex items-center gap-1 text-[#b2b5be] truncate">
+                    <span className="truncate">{selectedSymbolObj.name}</span>
+                    <ExternalLink className="w-2.5 h-2.5 inline text-[#787b86] shrink-0" />
+                    <span className="shrink-0">· {selectedSymbolObj.exchange}</span>
                   </div>
-                  <div className="text-[#787b86] mt-0.5">{selectedSymbolObj.type}</div>
+                  <div className="text-[#787b86] text-[10.5px]">
+                    {selectedSymbolObj.type} · {selectedSymbolObj.lseMarket} ({selectedSymbolObj.lseHttpSymbol})
+                  </div>
                 </div>
 
-                {/* Big Price Readout matching Screenshot 1 ("28,304.00 USD  -80.50 -0.28%  ● Market open") */}
+                {/* Big Price Readout */}
                 <div>
                   <div className="flex items-baseline gap-1.5">
                     <span
                       data-testid="details-live-price"
-                      className={`text-[26px] font-bold font-mono tracking-tight tabular-nums leading-none ${
-                        selectedSymbolObj.change < 0 ? 'text-[#f23645]' : 'text-[#089981]'
+                      className={`text-[21px] font-bold font-mono tracking-tight tabular-nums leading-none ${
+                        selectedSymbolObj.price <= 0
+                          ? 'text-[#787b86]'
+                          : selectedSymbolObj.change < 0
+                          ? 'text-[#f23645]'
+                          : 'text-[#089981]'
                       }`}
                     >
-                      {formatPrice(selectedSymbolObj.price, selectedSymbolObj.decimals)}
+                      {selectedSymbolObj.price > 0
+                        ? formatPrice(selectedSymbolObj.price, selectedSymbolObj.decimals)
+                        : '—'}
                     </span>
-                    <span className="text-[11px] font-semibold text-[#9598a1]">
+                    <span className="text-[10px] font-semibold text-[#9598a1]">
                       {selectedSymbolObj.currency}
                     </span>
                   </div>
 
                   <div
-                    className={`flex items-center gap-2 text-[13px] font-mono font-medium tabular-nums mt-1 ${
-                      selectedSymbolObj.change < 0 ? 'text-[#f23645]' : 'text-[#089981]'
+                    className={`flex items-center gap-1.5 text-[12px] font-mono font-medium tabular-nums mt-0.5 ${
+                      selectedSymbolObj.price <= 0
+                        ? 'text-[#787b86]'
+                        : selectedSymbolObj.change < 0
+                        ? 'text-[#f23645]'
+                        : 'text-[#089981]'
                     }`}
                   >
                     <span>
-                      {selectedSymbolObj.change > 0 ? '+' : ''}
-                      {formatPrice(selectedSymbolObj.change, selectedSymbolObj.decimals)}
+                      {selectedSymbolObj.price > 0
+                        ? `${selectedSymbolObj.change > 0 ? '+' : ''}${formatPrice(
+                            selectedSymbolObj.change,
+                            selectedSymbolObj.decimals
+                          )}`
+                        : '—'}
                     </span>
                     <span>
-                      {selectedSymbolObj.changePercent > 0 ? '+' : ''}
-                      {selectedSymbolObj.changePercent.toFixed(2)}%
+                      {selectedSymbolObj.price > 0
+                        ? `${selectedSymbolObj.changePercent > 0 ? '+' : ''}${selectedSymbolObj.changePercent.toFixed(2)}%`
+                        : ''}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-1.5 text-[11px] text-[#089981] mt-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#089981]" />
-                    <span>Market open</span>
+                  <div className="flex items-center justify-between text-[10px] text-[#089981] mt-0.5">
+                    <div className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#089981]" />
+                      <span>
+                        {selectedSymbolObj.dataSource === 'lse-live'
+                          ? 'LSE WS Live'
+                          : 'LSE Market Feed'}
+                      </span>
+                    </div>
+                    <span className="text-[#787b86] font-mono">
+                      H {selectedSymbolObj.dayHigh > 0 ? formatPrice(selectedSymbolObj.dayHigh, selectedSymbolObj.decimals) : '—'}
+                    </span>
                   </div>
                 </div>
 
-                {/* Purple News Card matching Screenshot 1 */}
+                {/* Economic Calendar / Macro Card */}
                 <div
                   onClick={() => onSelectTab('news_calendar')}
                   role="button"
@@ -392,61 +701,78 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') onSelectTab('news_calendar');
                   }}
-                  className="bg-[#1d1729] hover:bg-[#251d34] border border-[#2d2340] rounded-lg p-3 transition-colors cursor-pointer"
+                  className="bg-[#1d1729] hover:bg-[#251d34] border border-[#2d2340] rounded-md p-2 transition-colors cursor-pointer"
                 >
-                  <div className="text-[11px] text-[#9598a1] mb-1">
-                    <span className="text-[#ba68c8] font-medium">News</span> · {activeNews.timeAgo}
+                  <div className="text-[10.5px] text-[#9598a1] mb-0.5 flex items-center justify-between">
+                    <span>
+                      <span className="text-[#ba68c8] font-medium">Calendar</span> ·{' '}
+                      {topEconomicEvent
+                        ? `${topEconomicEvent.region_code} · ${topEconomicEvent.date}`
+                        : 'LSE Macro Wire'}
+                    </span>
                   </div>
-                  <p className="text-[12px] text-[#d1d4dc] leading-relaxed line-clamp-3">
-                    {activeNews.headline}
+                  <p className="text-[11px] text-[#d1d4dc] leading-snug line-clamp-2">
+                    {topEconomicEvent
+                      ? topEconomicEvent.event
+                      : 'Loading LSE economic calendar releases...'}
                   </p>
-                  <div className="text-[11.5px] text-[#9598a1] hover:text-white mt-2 flex items-center gap-0.5">
-                    <span>More events</span>
+                  {topEconomicEvent && (
+                    <div className="text-[10px] font-mono text-[#9598a1] mt-1 flex gap-2">
+                      {topEconomicEvent.actual !== null && topEconomicEvent.actual !== undefined && (
+                        <span>Act: {topEconomicEvent.actual}</span>
+                      )}
+                      {topEconomicEvent.forecast !== null && topEconomicEvent.forecast !== undefined && (
+                        <span>Est: {topEconomicEvent.forecast}</span>
+                      )}
+                      {topEconomicEvent.previous !== null && topEconomicEvent.previous !== undefined && (
+                        <span>Prev: {topEconomicEvent.previous}</span>
+                      )}
+                    </div>
+                  )}
+                  <div className="text-[10.5px] text-[#9598a1] hover:text-white mt-1 flex items-center gap-0.5">
+                    <span>Economic events</span>
                     <span>›</span>
                   </div>
                 </div>
 
-                {/* Forward Curve Chart Section matching Screenshot 1 */}
-                <div className="pt-1">
-                  <div className="text-[12px] font-semibold text-[#e0e3eb] mb-2">
-                    Forward curve
+                {/* Real LSE Session Summary Metrics */}
+                <div className="pt-0.5">
+                  <div className="text-[11px] font-semibold text-[#e0e3eb] mb-1.5">
+                    Session Summary
                   </div>
-                  <div className="relative h-[88px] w-full bg-[#0d0f14] border border-[#181b24] rounded p-2">
-                    <div className="flex justify-between text-[10px] font-mono text-[#787b86] tabular-nums mb-1">
-                      <span>
-                        {formatPrice(
-                          forwardCurve[forwardCurve.length - 1]?.price ?? 37500,
-                          selectedSymbolObj.decimals
-                        )}
-                      </span>
-                      <span>{forwardCurve[0]?.contract} → {forwardCurve[forwardCurve.length - 1]?.contract}</span>
+                  <div className="bg-[#0d0f14] border border-[#181b24] rounded p-2 grid grid-cols-2 gap-y-1.5 gap-x-2 text-[10.5px] font-mono tabular-nums">
+                    <div>
+                      <div className="text-[9.5px] text-[#787b86]">Open</div>
+                      <div className="text-[#e0e3eb]">
+                        {selectedSymbolObj.dayOpen > 0
+                          ? formatPrice(selectedSymbolObj.dayOpen, selectedSymbolObj.decimals)
+                          : '—'}
+                      </div>
                     </div>
-                    <svg viewBox="0 0 220 48" className="w-full h-[46px] overflow-visible">
-                      <line x1="0" y1="6" x2="220" y2="6" stroke="#1e222d" strokeWidth="1" />
-                      <line x1="0" y1="26" x2="220" y2="26" stroke="#1e222d" strokeWidth="1" />
-                      <line x1="0" y1="44" x2="220" y2="44" stroke="#1e222d" strokeWidth="1" />
-                      <path
-                        d="M 8 40 Q 65 34, 115 24 T 212 8"
-                        fill="none"
-                        stroke="#2962ff"
-                        strokeWidth="2"
-                      />
-                      {forwardCurve.map((pt, i) => {
-                        const cx = 8 + (i / (forwardCurve.length - 1)) * 204;
-                        const cy = 40 - (i / (forwardCurve.length - 1)) * 32;
-                        return (
-                          <circle
-                            key={pt.contract}
-                            cx={cx}
-                            cy={cy}
-                            r="2.5"
-                            fill="#2962ff"
-                          >
-                            <title>{`${pt.contract} (${pt.monthLabel}): ${formatPrice(pt.price, selectedSymbolObj.decimals)}`}</title>
-                          </circle>
-                        );
-                      })}
-                    </svg>
+                    <div className="text-right">
+                      <div className="text-[9.5px] text-[#787b86]">Volume</div>
+                      <div className="text-[#e0e3eb]">
+                        {selectedSymbolObj.volume24h > 0
+                          ? Math.round(selectedSymbolObj.volume24h).toLocaleString()
+                          : '—'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[9.5px] text-[#787b86]">Day High</div>
+                      <div className="text-[#089981]">
+                        {selectedSymbolObj.dayHigh > 0
+                          ? formatPrice(selectedSymbolObj.dayHigh, selectedSymbolObj.decimals)
+                          : '—'}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[9.5px] text-[#787b86]">Day Low</div>
+                      <div className="text-[#f23645]">
+                        {selectedSymbolObj.dayLow > 0
+                          ? formatPrice(selectedSymbolObj.dayLow, selectedSymbolObj.decimals)
+                          : '—'}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -454,25 +780,27 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
           </>
         )}
 
-        {/* Alternate Tab 2: Price Alerts Panel */}
+        {/* Tab 2: Price Alerts Panel */}
         {activeTab === 'alerts' && (
           <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="h-[38px] px-3 flex items-center justify-between border-b border-[#222631]">
-              <span className="text-[13px] font-semibold text-white">Price Alerts ({alerts.length})</span>
+            <div className="h-[32px] px-2.5 flex items-center justify-between border-b border-[#222631]">
+              <span className="text-[12px] font-semibold text-white">
+                Price Alerts ({alerts.length})
+              </span>
               <button
                 type="button"
                 onClick={onOpenCreateAlert}
                 aria-label="Add New Alert"
-                className="px-2 py-1 rounded bg-[#2962ff] hover:bg-[#1e53e5] text-white text-xs font-medium flex items-center gap-1"
+                className="px-2 py-0.5 rounded bg-[#2962ff] hover:bg-[#1e53e5] text-white text-[11px] font-medium flex items-center gap-1"
               >
-                <Plus className="w-3.5 h-3.5" />
+                <Plus className="w-3 h-3" />
                 <span>Create</span>
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
+            <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
               {alerts.length === 0 ? (
                 <div className="text-center py-8 text-xs text-[#787b86]">
-                  No active alerts. Click Create to set a real-time price alert.
+                  No active alerts. Click Create to monitor live LSE ticks.
                 </div>
               ) : (
                 alerts.map((al) => (
@@ -495,7 +823,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                             ● Triggered at {al.triggeredAt}
                           </span>
                         ) : (
-                          <span className="text-[#2962ff]">● Active · Monitoring live feed</span>
+                          <span className="text-[#2962ff]">● Active · Monitoring live LSE feed</span>
                         )}
                       </div>
                     </div>
@@ -514,14 +842,14 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
           </div>
         )}
 
-        {/* Alternate Tab 3: Object Tree & Indicators Manager */}
+        {/* Tab 3: Object Tree & Indicators Manager */}
         {activeTab === 'object_tree' && (
           <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="h-[38px] px-3 flex items-center justify-between border-b border-[#222631]">
-              <span className="text-[13px] font-semibold text-white">Object Tree & Layers</span>
-              <span className="text-[11px] text-[#787b86]">{activeSymbol}</span>
+            <div className="h-[32px] px-2.5 flex items-center justify-between border-b border-[#222631]">
+              <span className="text-[12px] font-semibold text-white">Object Tree & Layers</span>
+              <span className="text-[10.5px] text-[#787b86]">{activeSymbol}</span>
             </div>
-            <div className="flex-1 overflow-y-auto p-2.5 space-y-3">
+            <div className="flex-1 overflow-y-auto p-2 space-y-2.5">
               <div>
                 <div className="text-[11px] font-semibold text-[#9598a1] uppercase tracking-wider mb-1.5">
                   Active Studies & Indicators
@@ -557,27 +885,82 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                   </p>
                 ) : (
                   <div className="space-y-1">
-                    {drawings.map((d) => (
-                      <div
-                        key={d.id}
-                        className="flex items-center justify-between px-2 py-1.5 rounded bg-[#141720] text-xs"
-                      >
-                        <div>
-                          <div className="text-white font-medium">{d.tool}</div>
-                          <div className="text-[10.5px] font-mono text-[#787b86] tabular-nums">
-                            {d.symbol} @ {formatPrice(d.p1, 2)}
+                    {drawings.map((d) => {
+                      const isSel = d.id === selectedDrawingId;
+                      return (
+                        <div
+                          key={d.id}
+                          onClick={() => onSelectDrawing(isSel ? null : d.id)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(ev) => {
+                            if (ev.key === 'Enter' || ev.key === ' ') {
+                              ev.preventDefault();
+                              onSelectDrawing(isSel ? null : d.id);
+                            }
+                          }}
+                          className={`flex items-center justify-between px-2 py-1.5 rounded text-xs cursor-pointer transition-colors ${
+                            isSel
+                              ? 'bg-[#2962ff]/20 border border-[#2962ff]'
+                              : 'bg-[#141720] hover:bg-[#1c202b] border border-transparent'
+                          }`}
+                        >
+                          <div className="min-w-0 pr-2">
+                            <div
+                              className={`font-medium truncate flex items-center gap-1.5 ${
+                                d.visible === false ? 'text-[#787b86] line-through' : 'text-white'
+                              }`}
+                            >
+                              <span
+                                style={{ backgroundColor: d.color }}
+                                className="w-2 h-2 rounded-full shrink-0"
+                              />
+                              <span className="truncate">{d.text || d.tool}</span>
+                            </div>
+                            <div className="text-[10.5px] font-mono text-[#787b86] tabular-nums">
+                              {d.symbol} @ {formatPrice(d.p1, 2)}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                onUpdateDrawing({ ...d, locked: !d.locked });
+                              }}
+                              aria-label={`${d.locked ? 'Unlock' : 'Lock'} drawing ${d.tool}`}
+                              className={`p-0.5 ${
+                                d.locked ? 'text-[#2962ff]' : 'text-[#787b86] hover:text-white'
+                              }`}
+                            >
+                              {d.locked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                onUpdateDrawing({ ...d, visible: d.visible === false });
+                              }}
+                              aria-label={`${d.visible === false ? 'Show' : 'Hide'} drawing ${d.tool}`}
+                              className="text-[#787b86] hover:text-white p-0.5"
+                            >
+                              {d.visible === false ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                onRemoveDrawing(d.id);
+                              }}
+                              aria-label={`Remove drawing ${d.tool}`}
+                              className="text-[#787b86] hover:text-[#f23645] p-0.5"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => onRemoveDrawing(d.id)}
-                          aria-label={`Remove drawing ${d.tool}`}
-                          className="text-[#787b86] hover:text-[#f23645]"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -585,33 +968,92 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
           </div>
         )}
 
-        {/* Alternate Tab 4: DOM Order Ticket & Active Positions */}
+        {/* Tab 4: DOM Order Ticket & Active Positions */}
         {activeTab === 'dom_trade' && (
           <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="h-[38px] px-3 flex items-center justify-between border-b border-[#222631]">
-              <span className="text-[13px] font-semibold text-white">Order DOM · {activeSymbol}</span>
-              <span className="text-[11px] font-mono text-[#089981]">LIVE</span>
+            <div className="h-[32px] px-2.5 flex items-center justify-between border-b border-[#222631]">
+              <span className="text-[12px] font-semibold text-white">Order DOM · {activeSymbol}</span>
+              <span className="text-[10.5px] font-mono text-[#089981]">LIVE</span>
             </div>
-            <div className="p-3 space-y-3 overflow-y-auto flex-1">
+            <div className="p-2 space-y-2.5 overflow-y-auto flex-1 text-xs">
+              <div className="grid grid-cols-3 gap-1.5">
+                <div>
+                  <label className="block text-[10px] text-[#787b86] mb-0.5">Qty / Contracts</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={1000}
+                    value={orderQty}
+                    onChange={(e) => setOrderQty(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    aria-label="Order Quantity"
+                    className="w-full h-7 px-2 rounded bg-[#141720] border border-[#222631] font-mono text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-[#787b86] mb-0.5">Stop Loss</label>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="Optional"
+                    value={orderSl}
+                    onChange={(e) => setOrderSl(e.target.value)}
+                    aria-label="Stop Loss Price"
+                    className="w-full h-7 px-1.5 rounded bg-[#141720] border border-[#222631] font-mono text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-[#787b86] mb-0.5">Take Profit</label>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="Optional"
+                    value={orderTp}
+                    onChange={(e) => setOrderTp(e.target.value)}
+                    aria-label="Take Profit Price"
+                    className="w-full h-7 px-1.5 rounded bg-[#141720] border border-[#222631] font-mono text-white"
+                  />
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => onQuickOrder('SELL')}
-                  className="py-2.5 px-3 rounded bg-[#f23645]/15 border border-[#f23645] text-[#f23645] hover:bg-[#f23645] hover:text-white transition-colors flex flex-col items-center"
+                  disabled={selectedSymbolObj.price <= 0}
+                  onClick={() =>
+                    onQuickOrder(
+                      'SELL',
+                      orderQty,
+                      parseFloat(orderSl) || undefined,
+                      parseFloat(orderTp) || undefined
+                    )
+                  }
+                  className="py-2 px-2.5 rounded bg-[#f23645]/15 border border-[#f23645] text-[#f23645] hover:bg-[#f23645] hover:text-white transition-colors disabled:opacity-50 flex flex-col items-center"
                 >
-                  <span className="text-[10px] font-bold uppercase">Sell Market</span>
+                  <span className="text-[10px] font-bold uppercase">Sell {orderQty} Mkt</span>
                   <span className="text-sm font-mono font-bold tabular-nums">
-                    {formatPrice(selectedSymbolObj.bid, selectedSymbolObj.decimals)}
+                    {selectedSymbolObj.bid > 0
+                      ? formatPrice(selectedSymbolObj.bid, selectedSymbolObj.decimals)
+                      : '—'}
                   </span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => onQuickOrder('BUY')}
-                  className="py-2.5 px-3 rounded bg-[#2962ff]/15 border border-[#2962ff] text-[#2962ff] hover:bg-[#2962ff] hover:text-white transition-colors flex flex-col items-center"
+                  disabled={selectedSymbolObj.price <= 0}
+                  onClick={() =>
+                    onQuickOrder(
+                      'BUY',
+                      orderQty,
+                      parseFloat(orderSl) || undefined,
+                      parseFloat(orderTp) || undefined
+                    )
+                  }
+                  className="py-2 px-2.5 rounded bg-[#2962ff]/15 border border-[#2962ff] text-[#2962ff] hover:bg-[#2962ff] hover:text-white transition-colors disabled:opacity-50 flex flex-col items-center"
                 >
-                  <span className="text-[10px] font-bold uppercase">Buy Market</span>
+                  <span className="text-[10px] font-bold uppercase">Buy {orderQty} Mkt</span>
                   <span className="text-sm font-mono font-bold tabular-nums">
-                    {formatPrice(selectedSymbolObj.ask, selectedSymbolObj.decimals)}
+                    {selectedSymbolObj.ask > 0
+                      ? formatPrice(selectedSymbolObj.ask, selectedSymbolObj.decimals)
+                      : '—'}
                   </span>
                 </button>
               </div>
@@ -622,7 +1064,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                 </div>
                 {positions.length === 0 ? (
                   <div className="text-xs text-[#787b86] py-4 text-center border border-dashed border-[#222631] rounded">
-                    No open positions. Click BUY or SELL on the chart or above.
+                    No open positions. Click BUY or SELL above or on chart.
                   </div>
                 ) : (
                   <div className="space-y-1.5">
@@ -675,193 +1117,852 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
           </div>
         )}
 
-        {/* Alternate Tab 5: News & Economic Calendar Stream */}
+        {/* Tab 5: Real LSE Economic Calendar & Macro Wire */}
         {activeTab === 'news_calendar' && (
           <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="h-[38px] px-3 flex items-center justify-between border-b border-[#222631]">
-              <span className="text-[13px] font-semibold text-white">Headlines & Macro Wire</span>
+            <div className="h-[32px] px-2.5 flex items-center justify-between border-b border-[#222631]">
+              <span className="text-[12px] font-semibold text-white">Economic Calendar</span>
               <button
                 type="button"
                 onClick={() => onSelectTab('watchlist')}
-                className="text-xs text-[#2962ff] hover:underline"
+                className="text-[11px] text-[#2962ff] hover:underline"
               >
                 Watchlist
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5">
-              {news.map((item) => (
-                <div
-                  key={item.id}
-                  onClick={() => onSelectSymbol(item.symbol)}
-                  className="p-2.5 rounded bg-[#141720] hover:bg-[#1c202b] border border-[#222631] cursor-pointer transition-colors"
-                >
-                  <div className="flex items-center justify-between text-[10.5px] text-[#9598a1] mb-1">
-                    <span className="font-bold text-[#ba68c8]">{item.symbol}</span>
-                    <span>{item.timeAgo}</span>
-                  </div>
-                  <div className="text-xs font-medium text-white leading-snug mb-1">
-                    {item.headline}
-                  </div>
-                  <p className="text-[11px] text-[#787b86] leading-relaxed">{item.summary}</p>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+              {economicEvents.length === 0 ? (
+                <div className="text-xs text-[#787b86] py-6 text-center">
+                  Loading LSE economic calendar releases...
                 </div>
-              ))}
+              ) : (
+                economicEvents.map((ev) => (
+                  <div
+                    key={String(ev.id)}
+                    className="p-2 rounded bg-[#141720] border border-[#222631] space-y-1"
+                  >
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="px-1.5 py-0.5 rounded bg-[#2962ff]/20 text-[#2962ff] font-bold">
+                        {ev.region_code}
+                      </span>
+                      <span className="font-mono text-[#787b86]">
+                        {ev.date} {ev.time || ''}
+                      </span>
+                    </div>
+                    <div className="text-[11.5px] font-medium text-white leading-snug">
+                      {ev.event}
+                    </div>
+                    <div className="flex items-center gap-2.5 text-[10px] font-mono text-[#9598a1]">
+                      <span>Act: {ev.actual ?? '—'}</span>
+                      <span>Est: {ev.forecast ?? ev.consensus ?? '—'}</span>
+                      <span>Prev: {ev.previous ?? '—'}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 6: LSE Fundamentals, History & Corporate Factors */}
+        {activeTab === 'screener_factors' && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="h-[32px] px-2.5 flex items-center justify-between border-b border-[#222631]">
+              <span className="text-[12px] font-semibold text-white truncate">
+                Fundamentals · {selectedSymbolObj.symbol}
+              </span>
+              <button
+                type="button"
+                onClick={() => onSelectTab('watchlist')}
+                className="text-[11px] text-[#2962ff] hover:underline shrink-0"
+              >
+                Back
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2.5 space-y-3 text-xs">
+              {loadingDetails ? (
+                <div className="py-8 text-center text-[#9598a1]">
+                  Fetching LSE overview, factors & profile...
+                </div>
+              ) : symbolDetails ? (
+                <>
+                  {symbolDetails.history && (
+                    <div className="p-2 rounded bg-[#141720] border border-[#222631] space-y-1">
+                      <div className="text-[10.5px] font-semibold text-[#9598a1] uppercase">
+                        LSE Dataset Coverage
+                      </div>
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-[#787b86]">Market / Key</span>
+                        <span className="font-mono text-white">
+                          {symbolDetails.market} / {symbolDetails.httpSymbol}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-[#787b86]">First Bar</span>
+                        <span className="font-mono text-[#d1d4dc]">
+                          {symbolDetails.history.first?.slice(0, 10)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-[#787b86]">Latest Bar</span>
+                        <span className="font-mono text-[#089981]">
+                          {symbolDetails.history.last?.slice(0, 16)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-[#787b86]">Stored 1m Rows</span>
+                        <span className="font-mono text-white">
+                          {symbolDetails.history.rows?.toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {symbolDetails.profile && (
+                    <div className="p-2 rounded bg-[#141720] border border-[#222631] space-y-1.5">
+                      <div className="text-[10.5px] font-semibold text-[#9598a1] uppercase">
+                        Company Profile
+                      </div>
+                      <div className="font-semibold text-white">
+                        {symbolDetails.profile.company_name}
+                      </div>
+                      <div className="text-[11px] text-[#9598a1]">
+                        {symbolDetails.profile.sector} · {symbolDetails.profile.industry}
+                      </div>
+                      <div className="grid grid-cols-2 gap-1 text-[10.5px] font-mono pt-1">
+                        <span className="text-[#787b86]">CEO:</span>
+                        <span className="text-right text-white truncate">
+                          {symbolDetails.profile.ceo || '—'}
+                        </span>
+                        <span className="text-[#787b86]">Beta:</span>
+                        <span className="text-right text-white">
+                          {symbolDetails.profile.beta ?? '—'}
+                        </span>
+                        <span className="text-[#787b86]">Mkt Cap:</span>
+                        <span className="text-right text-white">
+                          {symbolDetails.profile.market_cap
+                            ? `$${(symbolDetails.profile.market_cap / 1e9).toFixed(1)}B`
+                            : '—'}
+                        </span>
+                      </div>
+                      {symbolDetails.profile.description && (
+                        <p className="text-[10.5px] text-[#787b86] leading-relaxed line-clamp-4 pt-1">
+                          {symbolDetails.profile.description}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {symbolDetails.factors && (
+                    <div className="p-2 rounded bg-[#141720] border border-[#222631] space-y-1.5">
+                      <div className="text-[10.5px] font-semibold text-[#9598a1] uppercase">
+                        Corporate Actions ({symbolDetails.factors.dividendsCount} divs)
+                      </div>
+                      {symbolDetails.factors.recentDividends.length === 0 ? (
+                        <div className="text-[11px] text-[#787b86]">
+                          No dividend records on this contract.
+                        </div>
+                      ) : (
+                        symbolDetails.factors.recentDividends.slice(0, 5).map((d, idx) => (
+                          <div key={idx} className="flex justify-between text-[11px] font-mono">
+                            <span className="text-[#9598a1]">{d.ex_date || '—'}</span>
+                            <span className="text-[#089981]">
+                              ${Number(d.amount || 0).toFixed(3)}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="py-6 text-center text-[#787b86]">
+                  No overview returned for this symbol.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 7: Macro & Sovereign Bond Yields */}
+        {activeTab === 'macro_yields' && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="h-[32px] px-2.5 flex items-center justify-between border-b border-[#222631]">
+              <span className="text-[12px] font-semibold text-white">Sovereign Bond Yields</span>
+              <span className="text-[10px] font-mono text-[#089981]">LSE MACRO</span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {bondYields.length === 0 ? (
+                <div className="py-8 text-center text-xs text-[#787b86]">
+                  Loading sovereign yield curve...
+                </div>
+              ) : (
+                bondYields.map((y) => (
+                  <div
+                    key={y.symbol}
+                    className="px-2 py-1.5 rounded bg-[#141720] border border-[#222631] flex items-center justify-between text-[11px]"
+                  >
+                    <div>
+                      <div className="font-semibold text-white">
+                        {y.country_iso2} {y.maturity}
+                      </div>
+                      <div className="text-[10px] text-[#787b86]">{y.country_name}</div>
+                    </div>
+                    <div className="text-right font-mono">
+                      <div className="text-[#2962ff] font-bold">{Number(y.close).toFixed(3)}%</div>
+                      <div className="text-[9.5px] text-[#787b86]">{y.date}</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 8: Live WebSocket Tick Tape */}
+        {activeTab === 'tape' && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="h-[32px] px-2.5 flex items-center justify-between border-b border-[#222631]">
+              <span className="text-[12px] font-semibold text-white">Live LSE Tick Tape</span>
+              <span className="text-[10px] font-mono text-[#089981]">{tickTape.length} ticks</span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-1.5 space-y-1 font-mono text-[10.5px]">
+              {tickTape.length === 0 ? (
+                <div className="py-8 px-2 text-center font-sans text-xs text-[#787b86]">
+                  Waiting for incoming WebSocket ticks from data-ws / london-ws (active symbols like BTCUSDT stream 24/7).
+                </div>
+              ) : (
+                tickTape.map((tk) => (
+                  <div
+                    key={tk.id}
+                    onClick={() => onSelectSymbol(tk.symbol)}
+                    className="px-2 py-1 rounded bg-[#141720] hover:bg-[#1c202b] flex items-center justify-between cursor-pointer"
+                  >
+                    <div>
+                      <span className="font-bold text-white">{tk.symbol}</span>
+                      <span className="text-[9px] text-[#787b86] ml-1.5">{tk.sourceSocket}</span>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[#089981] font-semibold">{tk.price}</div>
+                      <div className="text-[9px] text-[#787b86]">
+                        {new Date(tk.ts).toLocaleTimeString()}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 9: LSE Historical CSV Estimator & Exporter */}
+        {activeTab === 'export_tools' && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="h-[32px] px-2.5 flex items-center justify-between border-b border-[#222631]">
+              <span className="text-[12px] font-semibold text-white">LSE CSV Exporter</span>
+              <span className="text-[10px] font-mono text-[#9598a1]">/v3/export</span>
+            </div>
+            <div className="p-2.5 space-y-2.5 overflow-y-auto flex-1 text-xs">
+              <div className="p-2 rounded bg-[#141720] border border-[#222631]">
+                <div className="text-[10.5px] text-[#787b86]">Target Instrument</div>
+                <div className="font-bold text-white">
+                  {selectedSymbolObj.symbol} ({selectedSymbolObj.lseMarket}:{selectedSymbolObj.lseHttpSymbol})
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10.5px] text-[#9598a1] mb-1">Timeframe</label>
+                <select
+                  value={expTf}
+                  onChange={(e) => setExpTf(e.target.value)}
+                  className="w-full h-8 px-2 rounded bg-[#141720] border border-[#222631] text-white"
+                >
+                  {['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1mo'].map((tf) => (
+                    <option key={tf} value={tf}>
+                      {tf} (active chart: {activeTimeframe})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-1.5">
+                <div>
+                  <label className="block text-[10.5px] text-[#9598a1] mb-1">From</label>
+                  <input
+                    type="date"
+                    value={expFrom}
+                    onChange={(e) => setExpFrom(e.target.value)}
+                    className="w-full h-8 px-1.5 rounded bg-[#141720] border border-[#222631] font-mono text-[11px] text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10.5px] text-[#9598a1] mb-1">To</label>
+                  <input
+                    type="date"
+                    value={expTo}
+                    onChange={(e) => setExpTo(e.target.value)}
+                    className="w-full h-8 px-1.5 rounded bg-[#141720] border border-[#222631] font-mono text-[11px] text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleEstimateExport}
+                  disabled={estimating}
+                  className="flex-1 h-8 rounded bg-[#222631] hover:bg-[#2a2e39] text-white font-medium"
+                >
+                  {estimating ? 'Estimating...' : 'Estimate Rows'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadLseCsv}
+                  className="flex-1 h-8 rounded bg-[#2962ff] hover:bg-[#1e53e5] text-white font-semibold flex items-center justify-center gap-1"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>CSV</span>
+                </button>
+              </div>
+
+              {estimateResult && (
+                <div className="p-2 rounded bg-[#141720] border border-[#222631] font-mono text-[11px]">
+                  {estimateResult.error ? (
+                    <span className="text-[#f23645]">{estimateResult.error}</span>
+                  ) : (
+                    <div className="space-y-0.5">
+                      <div className="flex justify-between">
+                        <span className="text-[#787b86]">Est. Rows:</span>
+                        <span className="text-white">{estimateResult.rows?.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-[#787b86]">Est. Size:</span>
+                        <span className="text-[#089981]">
+                          {((estimateResult.bytes || 0) / 1024).toFixed(1)} KB
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 10: Real LSE US Options Chain & Unusual Flow */}
+        {activeTab === 'options' && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="h-[32px] px-2.5 flex items-center justify-between border-b border-[#222631] shrink-0">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[12px] font-semibold text-white">US Options</span>
+                <span className="text-[9.5px] px-1 py-0.5 rounded bg-[#2962ff]/20 text-[#2962ff] font-mono font-semibold">
+                  OPRA
+                </span>
+              </div>
+              {optChainData?.underlyingPrice ? (
+                <span className="text-[11px] font-mono text-[#089981] tabular-nums">
+                  {optUnderlying} ${Number(optChainData.underlyingPrice).toFixed(2)}
+                </span>
+              ) : (
+                <span className="text-[10px] font-mono text-[#787b86]">{optUnderlying}</span>
+              )}
+            </div>
+
+            {/* Underlying Search + Quick Chips + Chain/Flow Switch */}
+            <div className="p-2 border-b border-[#222631] space-y-1.5 shrink-0">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const clean = optDraftTicker.trim().toUpperCase();
+                  if (clean) {
+                    setOptUnderlying(clean);
+                    setOptSelectedExpiry('');
+                  }
+                }}
+                className="flex items-center gap-1"
+              >
+                <input
+                  type="text"
+                  value={optDraftTicker}
+                  onChange={(e) => setOptDraftTicker(e.target.value.toUpperCase())}
+                  placeholder="Underlying (AAPL, SPY, NVDA...)"
+                  aria-label="Options Underlying Ticker"
+                  className="flex-1 h-7 px-2 rounded bg-[#141720] border border-[#222631] text-[11px] font-mono text-white focus:outline-none focus:border-[#2962ff]"
+                />
+                <button
+                  type="submit"
+                  className="h-7 px-2.5 rounded bg-[#2962ff] hover:bg-[#1e53e5] text-white text-[11px] font-semibold"
+                >
+                  Load
+                </button>
+              </form>
+
+              <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+                {['AAPL', 'NVDA', 'SPY', 'QQQ', 'TSLA', 'AMZN', 'MSFT', 'META'].map((tk) => (
+                  <button
+                    key={tk}
+                    type="button"
+                    onClick={() => {
+                      setOptDraftTicker(tk);
+                      setOptUnderlying(tk);
+                      setOptSelectedExpiry('');
+                    }}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-mono shrink-0 transition-colors ${
+                      optUnderlying === tk
+                        ? 'bg-[#2962ff] text-white font-semibold'
+                        : 'bg-[#141720] text-[#9598a1] hover:text-white hover:bg-[#1e222d]'
+                    }`}
+                  >
+                    {tk}
+                  </button>
+                ))}
+              </div>
+
+              {onOpenGexDashboard && (
+                <button
+                  type="button"
+                  onClick={() => onOpenGexDashboard(optUnderlying || 'SPY')}
+                  className="w-full h-7 rounded border border-[#2962ff]/50 bg-[#2962ff]/12 hover:bg-[#2962ff]/22 text-[11px] font-semibold text-white transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <Activity className="w-3.5 h-3.5 text-[#2962ff]" />
+                  <span>Open {optUnderlying || 'SPY'} 0DTE GEX & Orderflow</span>
+                </button>
+              )}
+
+              <div className="grid grid-cols-2 gap-1 bg-[#141720] p-0.5 rounded">
+                <button
+                  type="button"
+                  onClick={() => setOptSubTab('chain')}
+                  className={`py-1 rounded text-[11px] font-medium transition-colors ${
+                    optSubTab === 'chain'
+                      ? 'bg-[#2a2e39] text-white'
+                      : 'text-[#787b86] hover:text-white'
+                  }`}
+                >
+                  Option Chain
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOptSubTab('flow')}
+                  className={`py-1 rounded text-[11px] font-medium transition-colors ${
+                    optSubTab === 'flow'
+                      ? 'bg-[#2a2e39] text-white'
+                      : 'text-[#787b86] hover:text-white'
+                  }`}
+                >
+                  Unusual Flow
+                </button>
+              </div>
+
+              {optSubTab === 'chain' ? (
+                <div className="flex items-center gap-1">
+                  <select
+                    value={optSelectedExpiry}
+                    onChange={(e) => setOptSelectedExpiry(e.target.value)}
+                    aria-label="Filter Options Expiry"
+                    className="flex-1 h-6 px-1.5 rounded bg-[#141720] border border-[#222631] text-[10.5px] font-mono text-white focus:outline-none"
+                  >
+                    <option value="">All Expiries ({optChainData?.expiries.length || 0})</option>
+                    {(optChainData?.expiries || []).map((exp) => (
+                      <option key={exp} value={exp}>
+                        {exp}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex items-center bg-[#141720] border border-[#222631] rounded overflow-hidden text-[10px]">
+                    {(['all', 'call', 'put'] as const).map((ct) => (
+                      <button
+                        key={ct}
+                        type="button"
+                        onClick={() => setOptContractType(ct)}
+                        className={`px-1.5 py-1 uppercase font-semibold ${
+                          optContractType === ct
+                            ? ct === 'call'
+                              ? 'bg-[#089981] text-white'
+                              : ct === 'put'
+                              ? 'bg-[#f23645] text-white'
+                              : 'bg-[#2a2e39] text-white'
+                            : 'text-[#787b86] hover:text-white'
+                        }`}
+                      >
+                        {ct === 'all' ? 'All' : ct === 'call' ? 'C' : 'P'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-1 text-[10.5px]">
+                  <button
+                    type="button"
+                    onClick={() => setOptFlowAllMarket((v) => !v)}
+                    className={`px-2 py-0.5 rounded border ${
+                      optFlowAllMarket
+                        ? 'border-[#2962ff] bg-[#2962ff]/20 text-white'
+                        : 'border-[#222631] bg-[#141720] text-[#9598a1] hover:text-white'
+                    }`}
+                  >
+                    {optFlowAllMarket ? 'All Tickers' : `${optUnderlying} Only`}
+                  </button>
+                  <select
+                    value={optMinPremium}
+                    onChange={(e) => setOptMinPremium(Number(e.target.value))}
+                    aria-label="Minimum Flow Premium"
+                    className="h-6 px-1.5 rounded bg-[#141720] border border-[#222631] text-[10.5px] font-mono text-white"
+                  >
+                    <option value={0}>All Prints</option>
+                    <option value={25000}>$25k+ Prem</option>
+                    <option value={100000}>$100k+ Sweep</option>
+                    <option value={500000}>$500k+ Whale</option>
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {/* Contracts / Flow List */}
+            <div className="flex-1 overflow-y-auto">
+              {loadingOptions ? (
+                <div className="py-8 text-center text-xs text-[#9598a1]">
+                  Querying LSE OPRA options vault...
+                </div>
+              ) : optionsError ? (
+                <div className="p-3 text-center text-xs text-[#f23645]">{optionsError}</div>
+              ) : optSubTab === 'chain' ? (
+                !optChainData || optChainData.contracts.length === 0 ? (
+                  <div className="py-8 px-3 text-center text-xs text-[#787b86]">
+                    No option contracts found for {optUnderlying}. Try AAPL, NVDA, SPY, QQQ, or TSLA.
+                  </div>
+                ) : (
+                  <div>
+                    <div className="grid grid-cols-[62px_46px_50px_48px_1fr] px-2 py-1 text-[9.5px] text-[#787b86] border-b border-[#181b24] font-medium sticky top-0 bg-[#0a0a0d] z-10">
+                      <span>Strike</span>
+                      <span>Exp</span>
+                      <span className="text-right">Last</span>
+                      <span className="text-right">IV%</span>
+                      <span className="text-right">Δ / Vol</span>
+                    </div>
+                    <div className="divide-y divide-[#181b24]">
+                      {optChainData.contracts.map((c) => {
+                        const isCall = c.contract_type === 'call';
+                        const isCharted = activeSymbol === c.ticker || activeSymbol === c.occSymbol;
+                        return (
+                          <button
+                            key={c.ticker}
+                            type="button"
+                            onClick={() =>
+                              onSelectOptionContract?.({
+                                occSymbol: c.occSymbol,
+                                underlying: c.underlying,
+                                strike: c.strike,
+                                expiry: c.expiry,
+                                contract_type: c.contract_type,
+                              })
+                            }
+                            title={`Plot ${c.occSymbol} candlestick chart (Gamma: ${c.gamma?.toFixed(4) ?? '—'}, Theta: ${c.theta?.toFixed(3) ?? '—'})`}
+                            className={`w-full grid grid-cols-[62px_46px_50px_48px_1fr] px-2 py-1.5 text-left items-center text-[10.5px] font-mono tabular-nums transition-colors ${
+                              isCharted
+                                ? 'bg-[#2962ff]/20'
+                                : 'hover:bg-[#171a23]'
+                            }`}
+                          >
+                            <span className="flex items-center gap-1 font-semibold text-white">
+                              <span
+                                className={`px-1 rounded text-[9px] font-bold ${
+                                  isCall
+                                    ? 'bg-[#089981]/20 text-[#089981]'
+                                    : 'bg-[#f23645]/20 text-[#f23645]'
+                                }`}
+                              >
+                                {isCall ? 'C' : 'P'}
+                              </span>
+                              <span>{c.strike}</span>
+                            </span>
+                            <span className="text-[9.5px] text-[#9598a1]">
+                              {c.expiry.slice(5)}
+                            </span>
+                            <span className="text-right text-white font-semibold">
+                              ${Number(c.last_price || 0).toFixed(2)}
+                            </span>
+                            <span className="text-right text-[#d1d4dc]">
+                              {c.iv !== null ? `${(c.iv * 100).toFixed(0)}%` : '—'}
+                            </span>
+                            <span className="text-right text-[9.5px] text-[#787b86]">
+                              {c.delta !== null ? c.delta.toFixed(2) : '—'} ·{' '}
+                              {c.volume_today >= 1000
+                                ? `${(c.volume_today / 1000).toFixed(1)}k`
+                                : c.volume_today}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )
+              ) : optFlowPrints.length === 0 ? (
+                <div className="py-8 px-3 text-center text-xs text-[#787b86]">
+                  No unusual flow prints matched filter. Lower Min Prem or toggle All Tickers.
+                </div>
+              ) : (
+                <div className="p-1.5 space-y-1">
+                  {optFlowPrints.map((fl) => {
+                    const isCall = fl.contract_type === 'call';
+                    const premStr =
+                      fl.premium >= 1e6
+                        ? `$${(fl.premium / 1e6).toFixed(2)}M`
+                        : fl.premium >= 1e3
+                        ? `$${(fl.premium / 1e3).toFixed(0)}k`
+                        : `$${fl.premium.toFixed(0)}`;
+                    return (
+                      <button
+                        key={fl.id}
+                        type="button"
+                        onClick={() =>
+                          onSelectOptionContract?.({
+                            occSymbol: fl.occSymbol,
+                            underlying: fl.underlying,
+                            strike: fl.strike,
+                            expiry: fl.expiry,
+                            contract_type: fl.contract_type,
+                          })
+                        }
+                        className="w-full p-2 rounded bg-[#141720] hover:bg-[#1c202b] border border-[#222631] text-left space-y-1 transition-colors"
+                      >
+                        <div className="flex items-center justify-between text-[11px] font-mono">
+                          <span className="font-bold text-white flex items-center gap-1">
+                            <span>{fl.underlying}</span>
+                            <span
+                              className={`px-1 rounded text-[9px] ${
+                                isCall
+                                  ? 'bg-[#089981]/20 text-[#089981]'
+                                  : 'bg-[#f23645]/20 text-[#f23645]'
+                              }`}
+                            >
+                              ${fl.strike}
+                              {isCall ? 'C' : 'P'}
+                            </span>
+                            <span className="text-[9.5px] text-[#787b86] font-normal">
+                              {fl.expiry.slice(5)}
+                            </span>
+                          </span>
+                          <span
+                            className={`font-bold ${
+                              isCall ? 'text-[#089981]' : 'text-[#f23645]'
+                            }`}
+                          >
+                            {premStr}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] font-mono text-[#9598a1]">
+                          <span>
+                            {fl.volume}x @ ${Number(fl.last_price || 0).toFixed(2)}
+                            {fl.iv ? ` · IV ${(fl.iv * 100).toFixed(0)}%` : ''}
+                          </span>
+                          <span className="text-[#787b86]">
+                            {fl.ts ? fl.ts.slice(11, 19) : '—'}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )}
       </aside>
+      )}
 
-      {/* Far-Right Vertical Icon Rail (44px wide matching Screenshot 1) */}
+      {/* Far-Right Vertical Icon Rail (38px slim layout) */}
       <nav
         aria-label="Workspace Tools Rail"
-        className="w-[44px] bg-[#0a0a0d] border-l border-[#222631] flex flex-col items-center justify-between py-1.5 shrink-0"
+        className="w-[38px] bg-[#0a0a0d] border-l border-[#222631] flex flex-col items-center justify-between py-1 shrink-0"
       >
-        <div className="flex flex-col items-center gap-1.5">
-          {/* Watchlist Icon (Active) */}
+        <div className="flex flex-col items-center gap-1">
           <button
             type="button"
             onClick={() => onSelectTab('watchlist')}
             aria-label="Watchlist, Details and News"
-            title="Watchlist, Details and News"
-            className={`w-[34px] h-[34px] rounded-[6px] flex items-center justify-center transition-colors ${
-              activeTab === 'watchlist'
+            aria-pressed={panelOpen && activeTab === 'watchlist'}
+            title={panelOpen && activeTab === 'watchlist' ? 'Hide Watchlist' : 'Watchlist & Symbol Details'}
+            className={`w-[28px] h-[28px] rounded-[5px] flex items-center justify-center transition-colors ${
+              panelOpen && activeTab === 'watchlist'
                 ? 'bg-[#2a2e39] text-white border border-[#363a45]'
                 : 'text-[#b2b5be] hover:bg-[#1e222d] hover:text-white'
             }`}
           >
-            <Bookmark className="w-[18px] h-[18px]" />
+            <Bookmark className="w-[15px] h-[15px]" />
           </button>
 
-          {/* Alerts Clock Icon */}
           <button
             type="button"
             onClick={() => onSelectTab('alerts')}
             aria-label="Alerts Manager"
-            title="Alerts"
-            className={`w-[34px] h-[34px] rounded-[6px] flex items-center justify-center transition-colors ${
-              activeTab === 'alerts'
+            aria-pressed={panelOpen && activeTab === 'alerts'}
+            title="Price Alerts"
+            className={`w-[28px] h-[28px] rounded-[5px] flex items-center justify-center transition-colors ${
+              panelOpen && activeTab === 'alerts'
                 ? 'bg-[#2a2e39] text-white'
                 : 'text-[#b2b5be] hover:bg-[#1e222d] hover:text-white'
             }`}
           >
-            <Clock className="w-[18px] h-[18px]" />
+            <Clock className="w-[15px] h-[15px]" />
           </button>
 
-          {/* Object Tree / Data Window Icon */}
           <button
             type="button"
             onClick={() => onSelectTab('object_tree')}
             aria-label="Object Tree and Data Window"
-            title="Object Tree & Data Window"
-            className={`w-[34px] h-[34px] rounded-[6px] flex items-center justify-center transition-colors ${
-              activeTab === 'object_tree'
+            aria-pressed={panelOpen && activeTab === 'object_tree'}
+            title="Object Tree & Indicators"
+            className={`w-[28px] h-[28px] rounded-[5px] flex items-center justify-center transition-colors ${
+              panelOpen && activeTab === 'object_tree'
                 ? 'bg-[#2a2e39] text-white'
                 : 'text-[#b2b5be] hover:bg-[#1e222d] hover:text-white'
             }`}
           >
-            <Layers className="w-[18px] h-[18px]" />
+            <Layers className="w-[15px] h-[15px]" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectTab('options')}
+            aria-label="US Options Chain and Flow"
+            aria-pressed={panelOpen && activeTab === 'options'}
+            title="US Options Chain & Unusual Flow (OPRA)"
+            className={`w-[28px] h-[28px] rounded-[5px] flex items-center justify-center transition-colors ${
+              panelOpen && activeTab === 'options'
+                ? 'bg-[#2962ff] text-white'
+                : 'text-[#b2b5be] hover:bg-[#1e222d] hover:text-white'
+            }`}
+          >
+            <Activity className="w-[15px] h-[15px]" />
           </button>
         </div>
 
-        {/* Bottom Group of Right Rail Icons matching Screenshot 1 */}
-        <div className="flex flex-col items-center gap-1.5">
+        {/* Bottom Group of Right Rail Icons */}
+        <div className="flex flex-col items-center gap-1">
           <button
             type="button"
             onClick={() => onSelectTab('dom_trade')}
-            aria-label="Hotlists and DOM"
-            title="DOM Order Book & Positions"
-            className={`w-[34px] h-[34px] rounded-[6px] flex items-center justify-center transition-colors ${
-              activeTab === 'dom_trade'
+            aria-label="Order DOM and Positions"
+            className={`w-[28px] h-[28px] rounded-[5px] flex items-center justify-center transition-colors ${
+              panelOpen && activeTab === 'dom_trade'
+                ? 'bg-[#2a2e39] text-white'
+                : 'text-[#b2b5be] hover:bg-[#1e222d] hover:text-white'
+            }`}
+            title="DOM Order Ticket & Open Positions"
+          >
+            <Sparkles className="w-[15px] h-[15px]" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectTab('screener_factors')}
+            aria-label="Fundamentals and Corporate Factors"
+            title="LSE Fundamentals, History & Corporate Factors"
+            className={`w-[28px] h-[28px] rounded-[5px] flex items-center justify-center transition-colors ${
+              panelOpen && activeTab === 'screener_factors'
                 ? 'bg-[#2a2e39] text-white'
                 : 'text-[#b2b5be] hover:bg-[#1e222d] hover:text-white'
             }`}
           >
-            <Sparkles className="w-[18px] h-[18px]" />
+            <Target className="w-[15px] h-[15px]" />
           </button>
 
           <button
             type="button"
-            onClick={() => onSelectTab('dom_trade')}
-            aria-label="Trading Snipers and Targets"
-            className="w-[34px] h-[34px] rounded-[6px] flex items-center justify-center text-[#b2b5be] hover:bg-[#1e222d] hover:text-white transition-colors"
+            onClick={() => onSelectTab('macro_yields')}
+            aria-label="Sovereign Bond Yields and Macro"
+            title="Sovereign Bond Yields & Macro Coverage"
+            className={`w-[28px] h-[28px] rounded-[5px] flex items-center justify-center transition-colors ${
+              panelOpen && activeTab === 'macro_yields'
+                ? 'bg-[#2a2e39] text-white'
+                : 'text-[#b2b5be] hover:bg-[#1e222d] hover:text-white'
+            }`}
           >
-            <Target className="w-[18px] h-[18px]" />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onSelectTab('object_tree')}
-            aria-label="Pine Script and Patterns"
-            className="w-[34px] h-[34px] rounded-[6px] flex items-center justify-center text-[#b2b5be] hover:bg-[#1e222d] hover:text-white transition-colors"
-          >
-            <Triangle className="w-[18px] h-[18px]" />
+            <Triangle className="w-[15px] h-[15px]" />
           </button>
 
           <button
             type="button"
             onClick={() => onSelectTab('news_calendar')}
             aria-label="Economic Calendar"
-            title="Economic Calendar & News"
-            className={`w-[34px] h-[34px] rounded-[6px] flex items-center justify-center transition-colors ${
-              activeTab === 'news_calendar'
+            title="LSE Economic Calendar"
+            className={`w-[28px] h-[28px] rounded-[5px] flex items-center justify-center transition-colors ${
+              panelOpen && activeTab === 'news_calendar'
                 ? 'bg-[#2a2e39] text-white'
                 : 'text-[#b2b5be] hover:bg-[#1e222d] hover:text-white'
             }`}
           >
-            <Calendar className="w-[18px] h-[18px]" />
+            <Calendar className="w-[15px] h-[15px]" />
           </button>
 
-          {/* RSS Streams Icon with "99+" Red Badge matching Screenshot 1 */}
           <button
             type="button"
             onClick={() => onSelectTab('news_calendar')}
-            aria-label="Social Streams and Minds"
-            className="relative w-[34px] h-[34px] rounded-[6px] flex items-center justify-center text-[#b2b5be] hover:bg-[#1e222d] hover:text-white transition-colors"
+            aria-label="Economic Releases Wire"
+            title="Live Economic Releases Wire"
+            className="relative w-[28px] h-[28px] rounded-[5px] flex items-center justify-center text-[#b2b5be] hover:bg-[#1e222d] hover:text-white transition-colors"
           >
-            <Rss className="w-[18px] h-[18px]" />
-            <span className="absolute top-0.5 right-0 bg-[#f23645] text-white text-[8.5px] font-bold leading-none px-1 py-0.5 rounded-full">
-              99+
-            </span>
+            <Rss className="w-[15px] h-[15px]" />
+            {economicEvents.length > 0 && (
+              <span className="absolute top-0 right-0 bg-[#2962ff] text-white text-[7.5px] font-bold leading-none px-1 py-[1px] rounded-full">
+                {economicEvents.length}
+              </span>
+            )}
           </button>
 
-          {/* Notifications Bell Icon with "5" Red Badge matching Screenshot 1 */}
           <button
             type="button"
             onClick={() => onSelectTab('alerts')}
-            aria-label="Notifications"
-            className="relative w-[34px] h-[34px] rounded-[6px] flex items-center justify-center text-[#b2b5be] hover:bg-[#1e222d] hover:text-white transition-colors"
+            aria-label="Notifications and Alerts"
+            title="Price Alerts"
+            className="relative w-[28px] h-[28px] rounded-[5px] flex items-center justify-center text-[#b2b5be] hover:bg-[#1e222d] hover:text-white transition-colors"
           >
-            <Bell className="w-[18px] h-[18px]" />
-            <span className="absolute top-0.5 right-1 bg-[#f23645] text-white text-[9px] font-bold leading-none px-1 py-0.5 rounded-full">
-              5
-            </span>
+            <Bell className="w-[15px] h-[15px]" />
+            {activeAlertsCount > 0 && (
+              <span className="absolute top-0 right-0.5 bg-[#f23645] text-white text-[8px] font-bold leading-none px-1 py-[1px] rounded-full">
+                {activeAlertsCount}
+              </span>
+            )}
           </button>
 
           <button
             type="button"
-            onClick={() => onSelectTab('news_calendar')}
-            aria-label="Public Chat"
-            className="w-[34px] h-[34px] rounded-[6px] flex items-center justify-center text-[#b2b5be] hover:bg-[#1e222d] hover:text-white transition-colors"
+            onClick={() => onSelectTab('tape')}
+            aria-label="Live WebSocket Tick Tape"
+            title="Real-Time WebSocket Tick Tape"
+            className={`w-[28px] h-[28px] rounded-[5px] flex items-center justify-center transition-colors ${
+              panelOpen && activeTab === 'tape'
+                ? 'bg-[#2a2e39] text-white'
+                : 'text-[#b2b5be] hover:bg-[#1e222d] hover:text-white'
+            }`}
           >
-            <MessageSquare className="w-[18px] h-[18px]" />
+            <MessageSquare className="w-[15px] h-[15px]" />
           </button>
 
-          {/* White Circle 9-Dot App Grid Button matching Screenshot 1 */}
+          {/* White Circle 9-Dot App Grid Button -> LSE CSV Estimator & Export Tools */}
           <button
             type="button"
-            onClick={() => onSelectTab('watchlist')}
-            aria-label="TradingView Products Grid"
-            className="w-[32px] h-[32px] rounded-full bg-[#f0f3fa] text-[#0a0a0d] flex items-center justify-center shadow-xs hover:bg-white transition-colors my-0.5"
+            onClick={() => onSelectTab('export_tools')}
+            aria-label="LSE Data Export and Estimator"
+            title="LSE CSV Estimator & Downloader"
+            className={`w-[26px] h-[26px] rounded-full flex items-center justify-center shadow-xs transition-colors my-0.5 ${
+              panelOpen && activeTab === 'export_tools'
+                ? 'bg-[#2962ff] text-white'
+                : 'bg-[#f0f3fa] text-[#0a0a0d] hover:bg-white'
+            }`}
           >
-            <Grid className="w-[17px] h-[17px]" />
+            <Grid className="w-[14px] h-[14px]" />
           </button>
 
           <button
             type="button"
-            onClick={() => onSelectTab('object_tree')}
-            aria-label="Help Center"
-            className="w-[34px] h-[34px] rounded-[6px] flex items-center justify-center text-[#b2b5be] hover:bg-[#1e222d] hover:text-white transition-colors"
+            onClick={onOpenUsageModal}
+            aria-label="LSE API Quota and Help"
+            title="LSE API Quota, Sockets & Keyboard Shortcuts"
+            className="w-[28px] h-[28px] rounded-[5px] flex items-center justify-center text-[#b2b5be] hover:bg-[#1e222d] hover:text-white transition-colors"
           >
-            <HelpCircle className="w-[18px] h-[18px]" />
+            <HelpCircle className="w-[15px] h-[15px]" />
           </button>
         </div>
       </nav>

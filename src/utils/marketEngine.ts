@@ -2,7 +2,7 @@ export interface SymbolInfo {
   symbol: string;
   name: string;
   exchange: string;
-  type: 'Futures' | 'Stock' | 'Crypto' | 'Forex' | 'Index';
+  type: 'Futures' | 'Stock' | 'Crypto' | 'Forex' | 'Index' | 'Commodity' | 'Options';
   contractCode: string;
   currency: string;
   price: number;
@@ -18,10 +18,16 @@ export interface SymbolInfo {
   badgeColor?: string;
   flagColor?: 'red' | 'orange' | 'blue' | 'green' | null;
   volume24h: number;
-  openInterest?: string;
   dayHigh: number;
   dayLow: number;
   dayOpen: number;
+  // Real LSE Data 3.0 routing metadata
+  lseMarket: string;
+  lseHttpSymbol: string;
+  lseWsSymbol?: string;
+  lseWsEndpoint?: 'data-ws' | 'london-ws' | 'tsx-ws';
+  lastTickTs?: string;
+  dataSource?: 'lse-live' | 'lse-rest' | 'cached';
 }
 
 export interface CandleBar {
@@ -47,8 +53,8 @@ export interface IVWallLevel {
 
 export interface SupplyDemandZone {
   id: string;
-  startTimeIndex: number; // Index relative to candle array or unix timestamp
-  endTimeIndex: number;   // Index relative to candle array (-1 means extends to right edge)
+  startTimeIndex: number;
+  endTimeIndex: number;
   topPrice: number;
   bottomPrice: number;
   color: string;
@@ -89,241 +95,226 @@ export interface TradePosition {
   timestamp: string;
 }
 
-export interface ForwardCurvePoint {
-  contract: string;
-  monthLabel: string;
-  price: number;
-}
-
+/**
+ * Canonical LSE Data 3.0 watchlist instruments (all prices start at 0 and hydrate strictly from LSE REST / WS).
+ */
 export const INITIAL_SYMBOLS: SymbolInfo[] = [
   {
-    symbol: 'NQ1!',
-    name: 'NASDAQ 100 E-mini Futures',
+    symbol: 'NASDAQ100',
+    name: 'Nasdaq 100 Futures',
     exchange: 'CME',
     type: 'Futures',
-    contractCode: 'NQZ2026',
+    contractCode: 'FUTURES',
     currency: 'USD',
-    price: 28304.00,
-    change: -80.50,
-    changePercent: -0.28,
-    bid: 28303.75,
-    ask: 28304.50,
-    spread: 0.75,
+    price: 0,
+    change: 0,
+    changePercent: 0,
+    bid: 0,
+    ask: 0,
+    spread: 0.25,
     tickSize: 0.25,
     decimals: 2,
-    badgeText: '100',
+    badgeText: 'ND',
     badgeBg: '#0097a7',
     flagColor: 'red',
-    volume24h: 342890,
-    openInterest: '284.1K',
-    dayHigh: 28492.50,
-    dayLow: 28261.25,
-    dayOpen: 28384.50,
+    volume24h: 0,
+    dayHigh: 0,
+    dayLow: 0,
+    dayOpen: 0,
+    lseMarket: 'futures',
+    lseHttpSymbol: 'NASDAQ100',
+    lseWsSymbol: 'NASDAQ100.F',
+    lseWsEndpoint: 'data-ws',
   },
   {
-    symbol: 'YM1!',
-    name: 'Dow Jones E-mini Futures',
+    symbol: 'DOW',
+    name: 'Dow Jones Futures',
     exchange: 'CBOT',
     type: 'Futures',
-    contractCode: 'YMZ2026',
+    contractCode: 'FUTURES',
     currency: 'USD',
-    price: 52342,
-    change: -48,
-    changePercent: -0.09,
-    bid: 52341,
-    ask: 52343,
-    spread: 2,
+    price: 0,
+    change: 0,
+    changePercent: 0,
+    bid: 0,
+    ask: 0,
+    spread: 1,
     tickSize: 1,
     decimals: 0,
-    badgeText: '30',
+    badgeText: 'DJ',
     badgeBg: '#00acc1',
     flagColor: 'red',
-    volume24h: 128450,
-    openInterest: '112.4K',
-    dayHigh: 52480,
-    dayLow: 52210,
-    dayOpen: 52390,
+    volume24h: 0,
+    dayHigh: 0,
+    dayLow: 0,
+    dayOpen: 0,
+    lseMarket: 'futures',
+    lseHttpSymbol: 'DOW',
+    lseWsSymbol: 'DOW.F',
+    lseWsEndpoint: 'data-ws',
   },
   {
-    symbol: 'ES1!',
-    name: 'S&P 500 E-mini Futures',
+    symbol: 'SP500',
+    name: 'S&P 500 Futures',
     exchange: 'CME',
     type: 'Futures',
-    contractCode: 'ESZ2026',
+    contractCode: 'FUTURES',
     currency: 'USD',
-    price: 7606.50,
-    change: -8.75,
-    changePercent: -0.11,
-    bid: 7606.25,
-    ask: 7606.75,
-    spread: 0.50,
+    price: 0,
+    change: 0,
+    changePercent: 0,
+    bid: 0,
+    ask: 0,
+    spread: 0.25,
     tickSize: 0.25,
     decimals: 2,
-    badgeText: '500',
+    badgeText: 'SP',
     badgeBg: '#e53935',
     flagColor: 'red',
-    volume24h: 894120,
-    openInterest: '1.82M',
-    dayHigh: 7634.00,
-    dayLow: 7588.25,
-    dayOpen: 7615.25,
+    volume24h: 0,
+    dayHigh: 0,
+    dayLow: 0,
+    dayOpen: 0,
+    lseMarket: 'futures',
+    lseHttpSymbol: 'SP500',
+    lseWsSymbol: 'SP500.F',
+    lseWsEndpoint: 'data-ws',
   },
   {
-    symbol: 'GC1!',
+    symbol: 'GOLD',
     name: 'Gold Futures',
     exchange: 'COMEX',
     type: 'Futures',
-    contractCode: 'GCZ2026',
+    contractCode: 'FUTURES',
     currency: 'USD',
-    price: 3898.3,
-    change: 13.0,
-    changePercent: 0.33,
-    bid: 3898.1,
-    ask: 3898.5,
-    spread: 0.4,
+    price: 0,
+    change: 0,
+    changePercent: 0,
+    bid: 0,
+    ask: 0,
+    spread: 0.1,
     tickSize: 0.1,
     decimals: 1,
-    badgeText: 'GC',
+    badgeText: 'AU',
     badgeBg: '#fbc02d',
     badgeColor: '#131722',
     flagColor: 'orange',
-    volume24h: 215600,
-    openInterest: '495.2K',
-    dayHigh: 3912.4,
-    dayLow: 3879.0,
-    dayOpen: 3885.3,
+    volume24h: 0,
+    dayHigh: 0,
+    dayLow: 0,
+    dayOpen: 0,
+    lseMarket: 'futures',
+    lseHttpSymbol: 'GOLD',
+    lseWsSymbol: 'GOLD.F',
+    lseWsEndpoint: 'data-ws',
   },
   {
-    symbol: 'CL1!',
-    name: 'Light Sweet Crude Oil Futures',
+    symbol: 'CRUDEOIL',
+    name: 'Crude Oil Futures',
     exchange: 'NYMEX',
     type: 'Futures',
-    contractCode: 'CLZ2026',
+    contractCode: 'FUTURES',
     currency: 'USD',
-    price: 71.45,
-    change: 0.82,
-    changePercent: 1.16,
-    bid: 71.44,
-    ask: 71.46,
-    spread: 0.02,
+    price: 0,
+    change: 0,
+    changePercent: 0,
+    bid: 0,
+    ask: 0,
+    spread: 0.01,
     tickSize: 0.01,
     decimals: 2,
     badgeText: 'CL',
     badgeBg: '#ff8f00',
     flagColor: null,
-    volume24h: 412300,
-    openInterest: '1.31M',
-    dayHigh: 72.10,
-    dayLow: 70.35,
-    dayOpen: 70.63,
+    volume24h: 0,
+    dayHigh: 0,
+    dayLow: 0,
+    dayOpen: 0,
+    lseMarket: 'futures',
+    lseHttpSymbol: 'CRUDEOIL',
+    lseWsSymbol: 'CRUDEOIL.F',
+    lseWsEndpoint: 'data-ws',
   },
   {
-    symbol: 'BTCUSD',
-    name: 'Bitcoin / U.S. Dollar',
-    exchange: 'COINBASE',
+    symbol: 'BTCUSDT',
+    name: 'Bitcoin / Tether',
+    exchange: 'CRYPTO',
     type: 'Crypto',
-    contractCode: 'SPOT',
+    contractCode: 'CRYPTO',
     currency: 'USD',
-    price: 98420.00,
-    change: 1450.00,
-    changePercent: 1.49,
-    bid: 98418.50,
-    ask: 98421.50,
-    spread: 3.00,
-    tickSize: 0.50,
+    price: 0,
+    change: 0,
+    changePercent: 0,
+    bid: 0,
+    ask: 0,
+    spread: 0.01,
+    tickSize: 0.01,
     decimals: 2,
     badgeText: '₿',
     badgeBg: '#f7931a',
     flagColor: 'blue',
-    volume24h: 48920,
-    dayHigh: 99150.00,
-    dayLow: 96580.00,
-    dayOpen: 96970.00,
+    volume24h: 0,
+    dayHigh: 0,
+    dayLow: 0,
+    dayOpen: 0,
+    lseMarket: 'crypto',
+    lseHttpSymbol: 'BTCUSDT',
+    lseWsSymbol: 'BTC/USD',
+    lseWsEndpoint: 'london-ws',
   },
   {
     symbol: 'NVDA',
     name: 'NVIDIA Corporation',
     exchange: 'NASDAQ',
     type: 'Stock',
-    contractCode: 'EQ',
+    contractCode: 'US_STOCKS',
     currency: 'USD',
-    price: 164.80,
-    change: -2.15,
-    changePercent: -1.29,
-    bid: 164.78,
-    ask: 164.82,
-    spread: 0.04,
+    price: 0,
+    change: 0,
+    changePercent: 0,
+    bid: 0,
+    ask: 0,
+    spread: 0.01,
     tickSize: 0.01,
     decimals: 2,
     badgeText: 'NV',
     badgeBg: '#76b900',
     flagColor: null,
-    volume24h: 64120000,
-    dayHigh: 168.40,
-    dayLow: 163.50,
-    dayOpen: 166.95,
+    volume24h: 0,
+    dayHigh: 0,
+    dayLow: 0,
+    dayOpen: 0,
+    lseMarket: 'us_stocks',
+    lseHttpSymbol: 'NVDA',
+    lseWsSymbol: 'NVDA',
+    lseWsEndpoint: 'data-ws',
   },
   {
-    symbol: 'EURUSD',
+    symbol: 'EUR_USD',
     name: 'Euro / U.S. Dollar',
-    exchange: 'CME',
+    exchange: 'FX',
     type: 'Forex',
-    contractCode: '6EZ2026',
+    contractCode: 'FOREX',
     currency: 'USD',
-    price: 1.0842,
-    change: 0.0018,
-    changePercent: 0.17,
-    bid: 1.0841,
-    ask: 1.0843,
-    spread: 0.0002,
-    tickSize: 0.0001,
-    decimals: 4,
+    price: 0,
+    change: 0,
+    changePercent: 0,
+    bid: 0,
+    ask: 0,
+    spread: 0.00001,
+    tickSize: 0.00001,
+    decimals: 5,
     badgeText: 'EU',
     badgeBg: '#3949ab',
     flagColor: null,
-    volume24h: 195400,
-    dayHigh: 1.0868,
-    dayLow: 1.0815,
-    dayOpen: 1.0824,
-  },
-];
-
-export const INITIAL_NEWS: NewsItem[] = [
-  {
-    id: 'news-1',
-    symbol: 'NQ1!',
-    source: 'Reuters · MarketWatch',
-    timeAgo: '2 hours ago',
-    headline: 'Burry doubles down on Nasdaq 100 puts, increases bearish SMH position amid Nvidia leadership turmoil',
-    summary: 'Institutional 13F filings reveal Scion Asset Management expanded its downside hedge on Nasdaq-100 futures and semiconductor ETFs heading into Q4 expiration.',
-    sentiment: 'bearish',
-  },
-  {
-    id: 'news-2',
-    symbol: 'ES1!',
-    source: 'Bloomberg',
-    timeAgo: '3 hours ago',
-    headline: 'CME E-mini S&P 500 overnight liquidity concentrates near 7,600 gamma wall ahead of CPI print',
-    summary: 'Dealer gamma positioning shows strong institutional support at the 1-sigma lower volatility boundary with overnight volume tracking 18% above 30-day average.',
-    sentiment: 'neutral',
-  },
-  {
-    id: 'news-3',
-    symbol: 'GC1!',
-    source: 'Dow Jones Newswires',
-    timeAgo: '4 hours ago',
-    headline: 'COMEX Gold futures test $3,900/oz as central bank physical allocations accelerate in Asian session',
-    summary: 'Spot and December COMEX gold futures rose 0.33% during electronic trading hours as sovereign buyers stepped in on dips.',
-    sentiment: 'bullish',
-  },
-  {
-    id: 'news-4',
-    symbol: 'YM1!',
-    source: 'Financial Times',
-    timeAgo: '5 hours ago',
-    headline: 'Industrial & financial rotation steadies Dow futures near 52,340 despite tech pullback',
-    summary: 'Blue-chip industrials outperformed high-multiple growth names as Treasury yields stabilized at the long end of the curve.',
-    sentiment: 'neutral',
+    volume24h: 0,
+    dayHigh: 0,
+    dayLow: 0,
+    dayOpen: 0,
+    lseMarket: 'forex',
+    lseHttpSymbol: 'EUR_USD',
+    lseWsSymbol: 'EUR/USD',
+    lseWsEndpoint: 'data-ws',
   },
 ];
 
@@ -336,6 +327,293 @@ export function formatPrice(price: number, decimals: number = 2): string {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
+}
+
+/**
+ * Normalizes a compact or padded OCC option symbol into the 21-character space-padded
+ * format required by LSE /v3/preview & /v3/export (e.g. "AAPL261127P00335000" -> "AAPL  261127P00335000").
+ */
+export function normalizeOccSymbol(rawSymbol: string): string {
+  const trimmed = String(rawSymbol || '').trim().toUpperCase();
+  const match = trimmed.match(/^([A-Z0-9]{1,6})\s*(\d{6}[CP]\d{8})$/);
+  if (!match) return rawSymbol;
+  const root = match[1].padEnd(6, ' ');
+  return `${root}${match[2]}`;
+}
+
+/**
+ * Formats an OCC option ticker into a human-readable contract label (e.g. "AAPL 26-11-27 $335 P").
+ */
+export function formatOptionContractLabel(rawSymbol: string): string {
+  const match = String(rawSymbol || '').trim().toUpperCase().match(/^([A-Z0-9]{1,6})\s*(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/);
+  if (!match) return rawSymbol;
+  const [, root, yy, mm, dd, cp, strikeRaw] = match;
+  const strike = Number(strikeRaw) / 1000;
+  const strikeStr = Number.isInteger(strike) ? String(strike) : strike.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  return `${root} ${yy}-${mm}-${dd} $${strikeStr}${cp}`;
+}
+
+/**
+ * Parses LSE ISO / SQL UTC timestamps ("2026-11-13 21:59:00" or "2026-11-15T08:36:58.001Z")
+ * cleanly into Unix epoch seconds.
+ */
+export function parseLseTimeToUnix(timeStr: string | number): number {
+  if (typeof timeStr === 'number') {
+    return timeStr > 1e12 ? Math.floor(timeStr / 1000) : Math.floor(timeStr);
+  }
+  const clean = String(timeStr || '').trim();
+  if (!clean) return Math.floor(Date.now() / 1000);
+  // Normalize "YYYY-MM-DD HH:MM:SS" into ISO UTC
+  let iso = clean.includes('T') ? clean : clean.replace(' ', 'T');
+  // Truncate sub-millisecond nanoseconds if present (e.g. .029000000Z -> .029Z)
+  iso = iso.replace(/(\.\d{3})\d+/, '$1');
+  if (!iso.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(iso)) {
+    iso += 'Z';
+  }
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : Math.floor(Date.now() / 1000);
+}
+
+/**
+ * Computes the bar open Unix timestamp bucket for a tick timestamp and timeframe duration.
+ */
+export function getTimeframeBucketStart(tickTimeSec: number, tfSec: number): number {
+  const safeTf = Math.max(1, tfSec);
+  if (safeTf >= 28 * 86400) {
+    const d = new Date(tickTimeSec * 1000);
+    const monthsPerBar = Math.max(1, Math.round(safeTf / (30 * 86400)));
+    const monthStart = Math.floor(d.getUTCMonth() / monthsPerBar) * monthsPerBar;
+    return Math.floor(Date.UTC(d.getUTCFullYear(), monthStart, 1) / 1000);
+  }
+  return Math.floor(tickTimeSec / safeTf) * safeTf;
+}
+
+/**
+ * Merges an incoming real-time WebSocket tick into existing historical/live candles cleanly:
+ * - Ignores stale/older ticks whose bucket precedes the latest stored bar.
+ * - Updates high/low/close/volume in-place when inside the active candle bucket.
+ * - Opens a new bar cleanly on bucket advance (and across REST-to-WS gaps opens at the
+ *   real tick price rather than stretching the stale prior REST bar into a giant candle).
+ */
+export function mergeTickIntoCandles(
+  candles: CandleBar[],
+  price: number,
+  tickTimeSec: number,
+  volume: number,
+  tfSec: number
+): CandleBar[] {
+  if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(tickTimeSec)) {
+    return candles;
+  }
+  const tickBucket = getTimeframeBucketStart(tickTimeSec, tfSec);
+  const tickVol = Number.isFinite(volume) && volume > 0 ? volume : 0;
+
+  if (candles.length === 0) {
+    return [
+      {
+        time: tickBucket,
+        open: price,
+        high: price,
+        low: price,
+        close: price,
+        volume: tickVol,
+      },
+    ];
+  }
+
+  const last = candles[candles.length - 1];
+
+  // Ignore out-of-order / historical replay ticks older than the latest candle
+  if (tickBucket < last.time) {
+    return candles;
+  }
+
+  // Same candle bucket -> update OHLCV in place
+  if (tickBucket === last.time) {
+    const updatedLast: CandleBar = {
+      ...last,
+      close: price,
+      high: Math.max(last.high, price),
+      low: Math.min(last.low, price),
+      volume: last.volume + tickVol,
+    };
+    return [...candles.slice(0, -1), updatedLast];
+  }
+
+  // New candle bucket strictly newer than last.time:
+  // Only chain open = last.close if it is the immediately adjacent bar with no session gap & tiny delta;
+  // across any REST-to-WS gap or overnight jump, open at the actual live tick price to prevent giant candles.
+  const isAdjacentBar = tickBucket - last.time <= Math.max(5, tfSec);
+  const relJump = last.close > 0 ? Math.abs(price - last.close) / last.close : 0;
+  const newOpen = isAdjacentBar && relJump <= 0.0025 ? last.close : price;
+
+  return [
+    ...candles,
+    {
+      time: tickBucket,
+      open: newOpen,
+      high: Math.max(newOpen, price),
+      low: Math.min(newOpen, price),
+      close: price,
+      volume: tickVol,
+    },
+  ];
+}
+
+/**
+ * Resamples ascending candles into UTC-aligned buckets of `bucketSec` seconds (supports sub-minute & multi-minute bars).
+ */
+export function resampleCandlesByTime(candles: CandleBar[], bucketSec: number): CandleBar[] {
+  if (bucketSec <= 1 || candles.length === 0) return candles;
+  const out: CandleBar[] = [];
+  for (const bar of candles) {
+    const bucket = getTimeframeBucketStart(bar.time, bucketSec);
+    const prev = out[out.length - 1];
+    if (prev && prev.time === bucket) {
+      prev.high = Math.max(prev.high, bar.high);
+      prev.low = Math.min(prev.low, bar.low);
+      prev.close = bar.close;
+      prev.volume += bar.volume;
+    } else {
+      out.push({
+        time: bucket,
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+        volume: bar.volume,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Combines REST historical candles with newer server-accumulated live WebSocket candles without overlap.
+ */
+export function mergeCandleStreams(
+  restCandles: CandleBar[],
+  liveCandles: CandleBar[]
+): CandleBar[] {
+  if (liveCandles.length === 0) return restCandles;
+  if (restCandles.length === 0) return liveCandles;
+
+  const lastRest = restCandles[restCandles.length - 1];
+  const merged = [...restCandles];
+
+  for (const live of liveCandles) {
+    if (live.time < lastRest.time) continue;
+    const tail = merged[merged.length - 1];
+    if (live.time === tail.time) {
+      merged[merged.length - 1] = {
+        ...tail,
+        high: Math.max(tail.high, live.high),
+        low: Math.min(tail.low, live.low),
+        close: live.close,
+        volume: Math.max(tail.volume, live.volume),
+      };
+    } else if (live.time > tail.time) {
+      merged.push(live);
+    }
+  }
+  return merged;
+}
+
+/**
+ * Maps TradingView toolbar / custom timeframe tokens to LSE Data 3.0 API parameters
+ * and optional server-side resampling factor.
+ */
+export function mapTimeframeToLse(tf: string): {
+  lseTimeframe: string;
+  resampleMinutes: number;
+  resampleMonths: number;
+  bucketSeconds: number;
+} {
+  const clean = tf.trim();
+  const bucketSeconds = parseTimeframeToSeconds(clean);
+
+  switch (clean) {
+    case '1s':
+    case '5s':
+    case '15s':
+    case '30s':
+    case '1m':
+    case '3m':
+    case '5m':
+    case '15m':
+    case '30m':
+    case '1h':
+    case '4h':
+      return { lseTimeframe: clean, resampleMinutes: 1, resampleMonths: 1, bucketSeconds };
+    case 'D':
+    case '1D':
+      return { lseTimeframe: '1d', resampleMinutes: 1, resampleMonths: 1, bucketSeconds };
+    case 'W':
+    case '1W':
+      return { lseTimeframe: '1w', resampleMinutes: 1, resampleMonths: 1, bucketSeconds };
+    case 'M':
+    case '1M':
+      return { lseTimeframe: '1mo', resampleMinutes: 1, resampleMonths: 1, bucketSeconds };
+    case '3M':
+      return { lseTimeframe: '1mo', resampleMinutes: 1, resampleMonths: 3, bucketSeconds };
+    case '6M':
+      return { lseTimeframe: '1mo', resampleMinutes: 1, resampleMonths: 6, bucketSeconds };
+    case '12M':
+    case '1Y':
+      return { lseTimeframe: '1mo', resampleMinutes: 1, resampleMonths: 12, bucketSeconds };
+    default: {
+      // Custom intervals (e.g. 2s, 10s, 20s, 45s, 2m, 7m, 10m, 45m, 2h, 6h, 3D)
+      if (clean.endsWith('s')) {
+        const secs = Math.max(1, parseInt(clean, 10) || 1);
+        const baseSecondsTf =
+          secs % 30 === 0
+            ? '30s'
+            : secs % 15 === 0
+            ? '15s'
+            : secs % 5 === 0
+            ? '5s'
+            : '1s';
+        return { lseTimeframe: baseSecondsTf, resampleMinutes: 1, resampleMonths: 1, bucketSeconds };
+      }
+      if (clean.endsWith('m')) {
+        const mins = Math.max(1, parseInt(clean, 10) || 1);
+        return { lseTimeframe: '1m', resampleMinutes: mins, resampleMonths: 1, bucketSeconds };
+      }
+      if (clean.endsWith('h')) {
+        const hrs = Math.max(1, parseInt(clean, 10) || 1);
+        return { lseTimeframe: '1h', resampleMinutes: hrs, resampleMonths: 1, bucketSeconds };
+      }
+      if (clean.endsWith('D') || clean.endsWith('d')) {
+        const days = Math.max(1, parseInt(clean, 10) || 1);
+        return { lseTimeframe: '1d', resampleMinutes: days, resampleMonths: 1, bucketSeconds };
+      }
+      if (clean.endsWith('W') || clean.endsWith('w')) {
+        const wks = Math.max(1, parseInt(clean, 10) || 1);
+        return { lseTimeframe: '1w', resampleMinutes: wks, resampleMonths: 1, bucketSeconds };
+      }
+      if (clean.endsWith('M')) {
+        const mos = Math.max(1, parseInt(clean, 10) || 1);
+        return { lseTimeframe: '1mo', resampleMinutes: 1, resampleMonths: mos, bucketSeconds };
+      }
+      return { lseTimeframe: '1m', resampleMinutes: 1, resampleMonths: 1, bucketSeconds };
+    }
+  }
+}
+
+/**
+ * Filters intraday candles between ETH (Extended Trading Hours) and RTH (Regular US Session 14:30-21:00 UTC)
+ */
+export function filterCandlesBySession(candles: CandleBar[], session: 'ETH' | 'RTH'): CandleBar[] {
+  if (session === 'ETH' || candles.length < 2) return candles;
+  const intervalSec = candles[1].time - candles[0].time;
+  // Only filter intraday timeframes (< 1 day)
+  if (intervalSec >= 86400) return candles;
+  const filtered = candles.filter((c) => {
+    const d = new Date(c.time * 1000);
+    const mins = d.getUTCHours() * 60 + d.getUTCMinutes();
+    return mins >= 14 * 60 + 30 && mins <= 21 * 60;
+  });
+  return filtered.length >= 10 ? filtered : candles;
 }
 
 /**
@@ -408,145 +686,12 @@ export function buildCustomTimeframe(value: number, unit: 's' | 'm' | 'h' | 'D' 
   return `${intVal}${unit}`;
 }
 
-/**
- * Deterministic PRNG for reproducible realistic market series
- */
-function mulberry32(seed: number): () => number {
-  let a = seed;
-  return function () {
-    let t = (a += 0x6d2b79f5);
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/**
- * Generates realistic 1-minute historical candles matching Screenshot 1's exact price trajectory for NQ1!
- * and proportional trajectories for other symbols.
- */
-export function generateHistoricalCandles(
-  symbolInfo: SymbolInfo,
-  timeframe: string = '1m',
-  barCount: number = 330
-): CandleBar[] {
-  const intervalSec = parseTimeframeToSeconds(timeframe);
-  // Base end timestamp aligned to 01:30:00 AM UTC-5 on the 13th (matching Screenshot 1: "13  12:30 AM  01:00 AM  01:30 AM")
-  // 2026-11-13 01:30:00 UTC (renders as 01:30 AM on lightweight-charts time axis)
-  const endTimestamp = 1794533400;
-  const startTimestamp = endTimestamp - (barCount - 1) * intervalSec;
-
-  // Normalized keyframe trajectory (from t=0.0 to t=1.0) modeled directly on Screenshot 1:
-  // Keeps early bars (t=0..0.24) high above 28,480 so the top-left legend has clean white space beneath it,
-  // drops through 28,400 around t=0.28, forms the mid-session swing around 28,325-28,385,
-  // dips to 28,262 around 01:00 AM (t=0.86), and rallies to 28,304.00 at 01:30 AM (t=1.00).
-  const keyframes: Array<[number, number]> = [
-    [0.00, 225],
-    [0.12, 215],
-    [0.20, 195],
-    [0.24, 165],
-    [0.29, 108],
-    [0.34, 78],
-    [0.38, 92],
-    [0.43, 16],
-    [0.47, 50],
-    [0.52, 74],
-    [0.57, 42],
-    [0.62, 82],
-    [0.67, 48],
-    [0.72, 24],
-    [0.77, 14],
-    [0.82, -14],
-    [0.86, -42],
-    [0.90, -36],
-    [0.94, 4],
-    [0.97, -2],
-    [1.00, 0],
-  ];
-
-  // Scale factor relative to NQ1! (where 1 unit = 1 point around 28,304)
-  const scaleRatio = (symbolInfo.price * 0.007) / 198;
-  const seed = symbolInfo.symbol.split('').reduce((acc, ch) => acc + ch.charCodeAt(0) * 31, 1337);
-  const rand = mulberry32(seed + intervalSec);
-
-  const interpolateOffset = (progress: number): number => {
-    for (let i = 0; i < keyframes.length - 1; i++) {
-      const [t0, v0] = keyframes[i];
-      const [t1, v1] = keyframes[i + 1];
-      if (progress >= t0 && progress <= t1) {
-        const localT = (progress - t0) / (t1 - t0);
-        return v0 + (v1 - v0) * localT;
-      }
-    }
-    return 0;
-  };
-
-  const candles: CandleBar[] = [];
-  let prevClose = symbolInfo.price + interpolateOffset(0) * scaleRatio;
-
-  for (let i = 0; i < barCount; i++) {
-    const progress = i / (barCount - 1);
-    const time = startTimestamp + i * intervalSec;
-    const targetPrice = symbolInfo.price + interpolateOffset(progress) * scaleRatio;
-    const noise = (rand() - 0.495) * 14 * scaleRatio;
-
-    const open = roundToTick(prevClose, symbolInfo.tickSize, symbolInfo.decimals);
-    let close = roundToTick(targetPrice + noise, symbolInfo.tickSize, symbolInfo.decimals);
-
-    // Ensure the final two candles match Screenshot 1's exact header readout for NQ1!:
-    // O28,306.00 H28,309.25 L28,298.00 C28,304.00 -3.00 (-0.01%)
-    if (i === barCount - 1) {
-      if (symbolInfo.symbol === 'NQ1!') {
-        const finalOpen = 28306.00;
-        const finalHigh = 28309.25;
-        const finalLow = 28298.00;
-        const finalClose = 28304.00;
-        candles.push({
-          time,
-          open: finalOpen,
-          high: finalHigh,
-          low: finalLow,
-          close: finalClose,
-          volume: 1840,
-        });
-        break;
-      } else {
-        close = symbolInfo.price;
-      }
-    }
-
-    const bodyMax = Math.max(open, close);
-    const bodyMin = Math.min(open, close);
-    const upperWick = (rand() * 11 + 2) * scaleRatio;
-    const lowerWick = (rand() * 11 + 2) * scaleRatio;
-
-    const high = roundToTick(bodyMax + upperWick, symbolInfo.tickSize, symbolInfo.decimals);
-    const low = roundToTick(Math.max(symbolInfo.tickSize, bodyMin - lowerWick), symbolInfo.tickSize, symbolInfo.decimals);
-    const volume = Math.floor(400 + rand() * 2200 * (1 + Math.abs(close - open) / (10 * scaleRatio + 0.0001)));
-
-    candles.push({
-      time,
-      open,
-      high,
-      low,
-      close,
-      volume,
-    });
-
-    prevClose = close;
-  }
-
-  return candles;
-}
-
 export function roundToTick(value: number, tickSize: number, decimals: number): number {
-  const ticks = Math.round(value / tickSize);
-  return Number((ticks * tickSize).toFixed(decimals));
+  const safeTick = tickSize > 0 ? tickSize : 0.01;
+  const ticks = Math.round(value / safeTick);
+  return Number((ticks * safeTick).toFixed(decimals));
 }
 
-/**
- * Converts standard OHLC candles to Heikin-Ashi candles
- */
 export function toHeikinAshiCandles(candles: CandleBar[]): CandleBar[] {
   if (candles.length === 0) return [];
   const result: CandleBar[] = [];
@@ -568,9 +713,6 @@ export function toHeikinAshiCandles(candles: CandleBar[]): CandleBar[] {
   return result;
 }
 
-/**
- * Resamples 1m candles into a larger bucket factor
- */
 export function resampleCandles(candles: CandleBar[], bucketSize: number): CandleBar[] {
   if (bucketSize <= 1 || candles.length === 0) return candles;
   const aggregated: CandleBar[] = [];
@@ -599,9 +741,6 @@ export function resampleCandles(candles: CandleBar[], bucketSize: number): Candl
   return aggregated;
 }
 
-/**
- * Simple Moving Average (SMA)
- */
 export function calculateSMA(candles: CandleBar[], period: number): Array<{ time: number; value: number }> {
   if (period <= 0 || candles.length < period) return [];
   const out: Array<{ time: number; value: number }> = [];
@@ -621,9 +760,6 @@ export function calculateSMA(candles: CandleBar[], period: number): Array<{ time
   return out;
 }
 
-/**
- * Exponential Moving Average (EMA)
- */
 export function calculateEMA(candles: CandleBar[], period: number): Array<{ time: number; value: number }> {
   if (period <= 0 || candles.length < period) return [];
   const out: Array<{ time: number; value: number }> = [];
@@ -638,9 +774,6 @@ export function calculateEMA(candles: CandleBar[], period: number): Array<{ time
   return out;
 }
 
-/**
- * Session Volume-Weighted Average Price (VWAP)
- */
 export function calculateVWAP(candles: CandleBar[]): Array<{ time: number; value: number }> {
   const out: Array<{ time: number; value: number }> = [];
   let cumPV = 0;
@@ -658,104 +791,81 @@ export function calculateVWAP(candles: CandleBar[]): Array<{ time: number; value
   return out;
 }
 
-/**
- * Returns the exact Institutional IV WALLS price levels shown on the right scale in Screenshot 1
- * for NQ1! (and scaled equivalents for any other active symbol).
- */
-export function getInstitutionalIVWalls(symbolInfo: SymbolInfo): IVWallLevel[] {
-  if (symbolInfo.symbol === 'NQ1!') {
-    return [
-      {
-        id: 'iv-pivot-high',
-        price: 28399.25,
-        label: '28,399.25',
-        sigma: '',
-        color: '#363a45',
-        bgColor: '#363a45',
-        textColor: '#ffffff',
-        lineStyle: 'solid',
-        category: 'pivot',
-      },
-      {
-        id: 'iv-u1',
-        price: 28365.56,
-        label: '28,365.56',
-        sigma: '1σ',
-        color: '#2962ff',
-        bgColor: '#2962ff',
-        textColor: '#ffffff',
-        lineStyle: 'solid',
-        category: 'upper_1sigma',
-      },
-      {
-        id: 'iv-u2',
-        price: 28351.93,
-        label: '28,351.93',
-        sigma: '1σ',
-        color: '#2962ff',
-        bgColor: '#2962ff',
-        textColor: '#ffffff',
-        lineStyle: 'solid',
-        category: 'upper_1sigma',
-      },
-      {
-        id: 'iv-u3',
-        price: 28350.50,
-        label: '28,350.50',
-        sigma: '1σ',
-        color: '#2962ff',
-        bgColor: '#2962ff',
-        textColor: '#ffffff',
-        lineStyle: 'solid',
-        category: 'upper_1sigma',
-      },
-      {
-        id: 'iv-u4',
-        price: 28349.50,
-        label: '28,349.50',
-        sigma: '1σ',
-        color: '#2962ff',
-        bgColor: '#2962ff',
-        textColor: '#ffffff',
-        lineStyle: 'solid',
-        category: 'upper_1sigma',
-      },
-      {
-        id: 'iv-l1',
-        price: 28228.00,
-        label: '28,228.00',
-        sigma: '1σ',
-        color: '#2962ff',
-        bgColor: '#2962ff',
-        textColor: '#ffffff',
-        lineStyle: 'solid',
-        category: 'lower_1sigma',
-      },
-      {
-        id: 'iv-l2',
-        price: 28212.94,
-        label: '28,212.94',
-        sigma: '1σ',
-        color: '#2962ff',
-        bgColor: '#2962ff',
-        textColor: '#ffffff',
-        lineStyle: 'solid',
-        category: 'lower_1sigma',
-      },
-    ];
-  }
+export function calculateBollingerBands(
+  candles: CandleBar[],
+  period: number = 20,
+  mult: number = 2
+): {
+  upper: Array<{ time: number; value: number }>;
+  middle: Array<{ time: number; value: number }>;
+  lower: Array<{ time: number; value: number }>;
+} {
+  const upper: Array<{ time: number; value: number }> = [];
+  const middle: Array<{ time: number; value: number }> = [];
+  const lower: Array<{ time: number; value: number }> = [];
+  if (candles.length < period) return { upper, middle, lower };
 
-  // Proportional IV Wall levels for other symbols
-  const p = symbolInfo.price;
+  for (let i = period - 1; i < candles.length; i++) {
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) sum += candles[j].close;
+    const mean = sum / period;
+    let sq = 0;
+    for (let j = i - period + 1; j <= i; j++) sq += (candles[j].close - mean) ** 2;
+    const sd = Math.sqrt(sq / period);
+    const t = candles[i].time;
+    middle.push({ time: t, value: Number(mean.toFixed(4)) });
+    upper.push({ time: t, value: Number((mean + mult * sd).toFixed(4)) });
+    lower.push({ time: t, value: Number((mean - mult * sd).toFixed(4)) });
+  }
+  return { upper, middle, lower };
+}
+
+/**
+ * Computes Institutional IV WALLS (session pivot + 1σ realized volatility bands)
+ * strictly from real loaded OHLC candles. Returns empty array when candles are insufficient.
+ */
+export function getInstitutionalIVWalls(
+  symbolInfo: SymbolInfo,
+  candles?: CandleBar[]
+): IVWallLevel[] {
+  if (!candles || candles.length < 20) return [];
   const d = symbolInfo.decimals;
   const t = symbolInfo.tickSize;
-  const r = (mult: number) => roundToTick(p * mult, t, d);
+  const recent = candles.slice(-Math.min(candles.length, 120));
+  let sessionHigh = -Infinity;
+  let sessionLow = Infinity;
+  let sumReturnsSq = 0;
+  let countRet = 0;
+
+  for (let i = 0; i < recent.length; i++) {
+    if (recent[i].high > sessionHigh) sessionHigh = recent[i].high;
+    if (recent[i].low < sessionLow) sessionLow = recent[i].low;
+    if (i > 0 && recent[i - 1].close > 0 && recent[i].close > 0) {
+      const ret = Math.log(recent[i].close / recent[i - 1].close);
+      sumReturnsSq += ret * ret;
+      countRet++;
+    }
+  }
+
+  const lastClose = recent[recent.length - 1].close;
+  if (!Number.isFinite(lastClose) || lastClose <= 0) return [];
+  const barSigma = countRet > 0 ? Math.sqrt(sumReturnsSq / countRet) : 0.0012;
+  const sigmaMove = Math.max(lastClose * 0.0015, lastClose * barSigma * Math.sqrt(28));
+  const rVal = (v: number) => roundToTick(v, t, d);
+
+  const pivot = rVal((sessionHigh + sessionLow + lastClose) / 3);
+  const u1 = rVal(lastClose + sigmaMove * 1.15);
+  const u2 = rVal(lastClose + sigmaMove * 0.92);
+  const u3 = rVal(lastClose + sigmaMove * 0.85);
+  const u4 = rVal(lastClose + sigmaMove * 0.78);
+  const l1 = rVal(Math.max(t, lastClose - sigmaMove * 0.88));
+  const l2 = rVal(Math.max(t, lastClose - sigmaMove * 1.15));
 
   return [
     {
       id: 'iv-pivot-high',
-      price: r(1.00336),
-      label: formatPrice(r(1.00336), d),
+      price: pivot,
+      label: formatPrice(pivot, d),
       sigma: '',
       color: '#363a45',
       bgColor: '#363a45',
@@ -765,8 +875,8 @@ export function getInstitutionalIVWalls(symbolInfo: SymbolInfo): IVWallLevel[] {
     },
     {
       id: 'iv-u1',
-      price: r(1.00217),
-      label: formatPrice(r(1.00217), d),
+      price: u1,
+      label: formatPrice(u1, d),
       sigma: '1σ',
       color: '#2962ff',
       bgColor: '#2962ff',
@@ -776,8 +886,30 @@ export function getInstitutionalIVWalls(symbolInfo: SymbolInfo): IVWallLevel[] {
     },
     {
       id: 'iv-u2',
-      price: r(1.00169),
-      label: formatPrice(r(1.00169), d),
+      price: u2,
+      label: formatPrice(u2, d),
+      sigma: '1σ',
+      color: '#2962ff',
+      bgColor: '#2962ff',
+      textColor: '#ffffff',
+      lineStyle: 'solid',
+      category: 'upper_1sigma',
+    },
+    {
+      id: 'iv-u3',
+      price: u3,
+      label: formatPrice(u3, d),
+      sigma: '1σ',
+      color: '#2962ff',
+      bgColor: '#2962ff',
+      textColor: '#ffffff',
+      lineStyle: 'solid',
+      category: 'upper_1sigma',
+    },
+    {
+      id: 'iv-u4',
+      price: u4,
+      label: formatPrice(u4, d),
       sigma: '1σ',
       color: '#2962ff',
       bgColor: '#2962ff',
@@ -787,8 +919,8 @@ export function getInstitutionalIVWalls(symbolInfo: SymbolInfo): IVWallLevel[] {
     },
     {
       id: 'iv-l1',
-      price: r(0.99731),
-      label: formatPrice(r(0.99731), d),
+      price: l1,
+      label: formatPrice(l1, d),
       sigma: '1σ',
       color: '#2962ff',
       bgColor: '#2962ff',
@@ -798,8 +930,8 @@ export function getInstitutionalIVWalls(symbolInfo: SymbolInfo): IVWallLevel[] {
     },
     {
       id: 'iv-l2',
-      price: r(0.99678),
-      label: formatPrice(r(0.99678), d),
+      price: l2,
+      label: formatPrice(l2, d),
       sigma: '1σ',
       color: '#2962ff',
       bgColor: '#2962ff',
@@ -811,87 +943,80 @@ export function getInstitutionalIVWalls(symbolInfo: SymbolInfo): IVWallLevel[] {
 }
 
 /**
- * Returns the green shaded institutional IV Wall / Quantum Wealth SSMT liquidity zones shown in Screenshot 1
+ * Computes Quantum Wealth SSMT liquidity & swing order-block zones dynamically from actual OHLC candles.
  */
 export function getSupplyDemandZones(symbolInfo: SymbolInfo, candles: CandleBar[]): SupplyDemandZone[] {
-  if (candles.length < 50) return [];
-  const p = symbolInfo.price;
-  const ratio = p / 28304.0;
+  if (candles.length < 30) return [];
   const n = candles.length;
+  const walls = getInstitutionalIVWalls(symbolInfo, candles);
+  if (walls.length < 7) return [];
+  const u1 = walls.find((w) => w.id === 'iv-u1')?.price ?? candles[n - 1].close * 1.002;
+  const u4 = walls.find((w) => w.id === 'iv-u4')?.price ?? candles[n - 1].close * 1.001;
+  const l1 = walls.find((w) => w.id === 'iv-l1')?.price ?? candles[n - 1].close * 0.998;
+  const l2 = walls.find((w) => w.id === 'iv-l2')?.price ?? candles[n - 1].close * 0.997;
+
+  const seg1Start = Math.floor(n * 0.25);
+  const seg1End = Math.floor(n * 0.45);
+  const seg2Start = Math.floor(n * 0.48);
+  const seg2End = Math.floor(n * 0.72);
+
+  let seg1Hi = candles[seg1Start].high;
+  let seg1Lo = candles[seg1Start].low;
+  for (let i = seg1Start; i <= seg1End && i < n; i++) {
+    if (candles[i].high > seg1Hi) seg1Hi = candles[i].high;
+    if (candles[i].low < seg1Lo) seg1Lo = candles[i].low;
+  }
+
+  let seg2Hi = candles[seg2Start].high;
+  let seg2Lo = candles[seg2Start].low;
+  for (let i = seg2Start; i <= seg2End && i < n; i++) {
+    if (candles[i].high > seg2Hi) seg2Hi = candles[i].high;
+    if (candles[i].low < seg2Lo) seg2Lo = candles[i].low;
+  }
+
+  const band1 = Math.max(symbolInfo.tickSize * 4, (seg1Hi - seg1Lo) * 0.14);
+  const band2 = Math.max(symbolInfo.tickSize * 4, (seg2Hi - seg2Lo) * 0.16);
 
   return [
-    // Upper left green step line/zone around 28,412
     {
       id: 'zone-1',
-      startTimeIndex: Math.floor(n * 0.25),
-      endTimeIndex: Math.floor(n * 0.44),
-      topPrice: 28415.0 * ratio,
-      bottomPrice: 28411.5 * ratio,
-      color: 'rgba(102, 187, 106, 0.22)',
+      startTimeIndex: seg1Start,
+      endTimeIndex: seg1End,
+      topPrice: seg1Hi,
+      bottomPrice: seg1Hi - band1,
+      color: 'rgba(102, 187, 106, 0.20)',
       borderColor: 'rgba(76, 175, 80, 0.45)',
     },
-    // Mid-session horizontal support line at 28,278 -> 28,292 green block
     {
       id: 'zone-2',
-      startTimeIndex: Math.floor(n * 0.44),
-      endTimeIndex: Math.floor(n * 0.63),
-      topPrice: 28279.5 * ratio,
-      bottomPrice: 28277.5 * ratio,
-      color: 'rgba(102, 187, 106, 0.22)',
-      borderColor: 'rgba(76, 175, 80, 0.45)',
+      startTimeIndex: seg2Start,
+      endTimeIndex: seg2End,
+      topPrice: seg2Lo + band2,
+      bottomPrice: seg2Lo,
+      color: 'rgba(129, 199, 132, 0.22)',
+      borderColor: 'rgba(76, 175, 80, 0.50)',
     },
-    // Prominent green order-block rectangle in the center-right (12:00 AM - 01:00 AM around 28,288 - 28,298)
     {
-      id: 'zone-3',
-      startTimeIndex: Math.floor(n * 0.63),
-      endTimeIndex: Math.floor(n * 0.83),
-      topPrice: 28298.5 * ratio,
-      bottomPrice: 28286.0 * ratio,
+      id: 'zone-upper-1sigma',
+      startTimeIndex: Math.floor(n * 0.82),
+      endTimeIndex: n - 1,
+      topPrice: Math.max(u1, u4),
+      bottomPrice: Math.min(u1, u4),
       color: 'rgba(129, 199, 132, 0.26)',
-      borderColor: 'rgba(76, 175, 80, 0.55)',
-    },
-    // Right-edge upper 1-sigma green liquidity box (28,349.50 - 28,365.56)
-    {
-      id: 'zone-4',
-      startTimeIndex: Math.floor(n * 0.83),
-      endTimeIndex: n - 1,
-      topPrice: 28365.56 * ratio,
-      bottomPrice: 28349.50 * ratio,
-      color: 'rgba(129, 199, 132, 0.28)',
       borderColor: 'rgba(41, 98, 255, 0.45)',
     },
-    // Right-edge lower 1-sigma green liquidity box (28,212.94 - 28,228.00)
     {
-      id: 'zone-5',
-      startTimeIndex: Math.floor(n * 0.83),
+      id: 'zone-lower-1sigma',
+      startTimeIndex: Math.floor(n * 0.82),
       endTimeIndex: n - 1,
-      topPrice: 28228.00 * ratio,
-      bottomPrice: 28212.94 * ratio,
-      color: 'rgba(129, 199, 132, 0.28)',
+      topPrice: Math.max(l1, l2),
+      bottomPrice: Math.min(l1, l2),
+      color: 'rgba(129, 199, 132, 0.26)',
       borderColor: 'rgba(41, 98, 255, 0.45)',
     },
   ];
 }
 
-/**
- * Generates Forward Curve term structure points for the right-hand details panel
- */
-export function getForwardCurve(symbolInfo: SymbolInfo): ForwardCurvePoint[] {
-  const base = symbolInfo.price;
-  const prefix = symbolInfo.symbol.replace('1!', '');
-  return [
-    { contract: `${prefix}Z2026`, monthLabel: 'Dec 26', price: Number(base.toFixed(2)) },
-    { contract: `${prefix}H2027`, monthLabel: 'Mar 27', price: Number((base * 1.012).toFixed(2)) },
-    { contract: `${prefix}M2027`, monthLabel: 'Jun 27', price: Number((base * 1.024).toFixed(2)) },
-    { contract: `${prefix}U2027`, monthLabel: 'Sep 27', price: Number((base * 1.036).toFixed(2)) },
-    { contract: `${prefix}Z2027`, monthLabel: 'Dec 27', price: Number((base * 1.049).toFixed(2)) },
-    { contract: `${prefix}H2028`, monthLabel: 'Mar 28', price: Number((base * 1.062).toFixed(2)) },
-  ];
-}
-
-/**
- * Calculates unrealized PnL for an open trade position
- */
 export function calculatePositionPnL(position: TradePosition, currentPrice: number): {
   pointsDiff: number;
   dollarPnL: number;
@@ -899,10 +1024,16 @@ export function calculatePositionPnL(position: TradePosition, currentPrice: numb
 } {
   const direction = position.side === 'BUY' ? 1 : -1;
   const pointsDiff = (currentPrice - position.entryPrice) * direction;
-  // Standard E-mini point value ($20/pt for NQ, $50/pt for ES, etc., simplified to 20 * qty)
-  const multiplier = position.symbol === 'NQ1!' ? 20 : position.symbol === 'ES1!' ? 50 : position.symbol === 'YM1!' ? 5 : 10;
+  const multiplier =
+    position.symbol === 'NASDAQ100'
+      ? 20
+      : position.symbol === 'SP500'
+      ? 50
+      : position.symbol === 'DOW'
+      ? 5
+      : 10;
   const dollarPnL = Number((pointsDiff * position.qty * multiplier).toFixed(2));
-  const percentPnL = Number(((pointsDiff / position.entryPrice) * 100).toFixed(2));
+  const percentPnL = position.entryPrice > 0 ? Number(((pointsDiff / position.entryPrice) * 100).toFixed(2)) : 0;
   return {
     pointsDiff: Number(pointsDiff.toFixed(4)),
     dollarPnL,
@@ -910,9 +1041,6 @@ export function calculatePositionPnL(position: TradePosition, currentPrice: numb
   };
 }
 
-/**
- * Evaluates whether a price alert should trigger given previous and new price
- */
 export function evaluateAlertTrigger(
   alert: PriceAlert,
   prevPrice: number,
